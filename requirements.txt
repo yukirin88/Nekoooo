@@ -3,3 +3,4 @@ gunicorn==23.0.0
 flask-wtf==1.0.1  # 最新バージョンを指定
 flask-bootstrap==3.3.7.1  # 最新バージョンを指定
 flask-cors
+pytz==2024.1
