@@ -1,0 +1,72 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}管理者ダッシュボード{% endblock %}
+<h1>ユーザーリスト</h1>
+{% block content %}
+<div class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <h1>管理者ダッシュボード</h1>
+  <a href="{{ url_for('logout') }}" class="btn btn-primary mb-3">ログアウト</a>
+
+  <h2>ユーザーリスト</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>ユーザー名</th>
+        <th>削除</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+        {% if not user.is_admin %}
+        <tr>
+          <td>{{ user.username }}</td>
+          <td>
+            <form action="{{ url_for('delete_user', user_id=user.id) }}" method="post">
+              <button type="submit" class="btn btn-danger btn-sm">削除</button>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>記録一覧</h2>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>ユーザー名</th>
+        <th>時間</th>
+        <th>行動</th>
+        <th>状態</th>
+        <th>メモ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for record in records %}
+        <tr>
+          <td>{{ record.username }}</td>
+          <td>{{ record.formatted_time }}</td>
+          <td>
+            {% if record.action == 'wake_up' %}起床
+            {% elif record.action == 'sleep' %}就寝
+            {% else %}{{ record.action }}
+            {% endif %}
+          </td>
+          <td>
+            {% if record.is_deleted %}削除済み{% else %}現存{% endif %}
+          </td>
+          <td>{{ record.memo if record.memo else '---' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
