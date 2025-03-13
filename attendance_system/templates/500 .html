@@ -1,0 +1,9 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}500 Internal Error{% endblock %}
+{% block content %}
+<div class="container text-center mt-5">
+    <h1 class="display-4">500 Internal Server Error</h1>
+    <p class="lead">サーバーでエラーが発生しました</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">ホームに戻る</a>
+</div>
+{% endblock %}
