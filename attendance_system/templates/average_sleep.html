@@ -1,0 +1,88 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}平均睡眠時間{% endblock %}
+{% block content %}
+<div class="container">
+    <h1>平均睡眠時間</h1>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">ホームに戻る</a>
+    <!-- 右上端に隠しボタン追加 -->
+    <div style="position: fixed; top: 10px; right: 10px; z-index: 100;">
+        <button id="secretButton" onclick="showSecretMessage()" style="background: transparent; border: none; cursor: pointer; opacity: 0.2;">
+            <span style="font-size: 20px; color: #ddd;">★</span>
+        </button>
+    </div>
+    
+    {% if sleep_times %}
+        <div class="card">
+            <div class="card-body">
+                <h2>あなたの平均睡眠時間: {{ avg_sleep_hours }}時間{{ avg_sleep_minutes }}分</h2>
+                {% if sleep_times|length >= 3 and evaluation %}
+                <h3>総評: {{ evaluation }}</h3>
+                {% endif %}
+            </div>
+        </div>
+        
+        <h3>睡眠記録</h3>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>日付</th>
+                    <th>睡眠時間</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in sleep_times %}
+                <tr>
+                    <td>{{ item.date }}</td>
+                    <td>{{ "%.2f"|format(item.duration) }} 時間</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="alert alert-info">
+            睡眠記録がありません。最低でも３日間、就寝と起床の記録をつけてください。
+        </div>
+    {% endif %}
+</div>
+
+<!-- 隠しメッセージ用モーダル -->
+<div id="secretModal" style="display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7);">
+    <div style="background-color: #333; margin: 15% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px; color: #ddd; position: relative;">
+        <span id="closeModal" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        <p id="secretMessage">ここに隠しメッセージを表示します！</p>
+    </div>
+</div>
+
+<script>
+function showSecretMessage() {
+    var modal = document.getElementById("secretModal");
+    modal.style.display = "block";
+    document.getElementById("secretMessage").innerHTML = `
+    <h3>睡眠時間の評価基準</h3>
+    <ul style="text-align: left; padding-left: 20px;">
+      <li>10時間半以上　寝すぎ⁉</li>
+      <li>9時間以上10時間半未満　ちょい寝すぎ。</li>
+      <li>7時間以上9時間未満　良好だよ</li>
+      <li>6時間以上7時間未満　もうちょい寝たかも</li>
+      <li>3時間半以上6時間未満　頼むこれ以上は...</li>
+      <li>3時間半未満　いい加減もっと寝ろよ！！</li>
+    </ul>
+  `;
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    var closeBtn = document.getElementById("closeModal");
+    var modal = document.getElementById("secretModal");
+    
+    closeBtn.onclick = function() {
+        modal.style.display = "none";
+    }
+    
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+});
+</script>
+{% endblock %}
