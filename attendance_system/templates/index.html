@@ -1,0 +1,302 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}睡眠記録{% endblock %}
+
+{% block styles %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+body {
+  margin: 0;
+  font-family: "Futura", Helvetica, sans-serif;
+}
+/* Navbar & Navmenu color */
+:root {
+  --background-navbar: rgba(55, 55, 55, 0.98);
+}
+
+.header {
+  background: var(--background-navbar);
+  position: fixed;
+  width: 100%;
+  height: 52px;
+  z-index: 1000;
+}
+
+/* Nav items */
+.menu {
+  list-style: none;
+  position: absolute;
+  width: 100%;
+  height: auto;
+  top: 0;
+  margin-top: 52px;
+  padding: 0 0 10px 0;
+  clear: both;
+  background: var(--background-navbar);
+  transition: 0.3192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.1008s;
+  transform: scale(1, 0);
+  transform-origin: top;
+}
+
+/* Hamburger menu button */
+.menu-btn:checked ~ .menu {
+  transform: scale(1, 1);
+  transform-origin: top;
+  transition: 0.3192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.1008s;
+}
+
+/* Hamburger menbu text */
+.menu a {
+  text-decoration: none;
+  font-weight: 500;
+  letter-spacing: 2px;
+  font-size: 16px;
+  text-transform: capitalize;
+  color: #ddd;
+  opacity: 0;
+  transition: 0.5s;
+}
+
+.menu li {
+  border-top: 1px solid rgb(75, 75, 75);
+  padding: 15px 0;
+  margin: 0 54px;
+  opacity: 0;
+  transition: 0.5s;
+}
+
+.menu-btn:checked ~ .menu a,
+.menu-btn:checked ~ .menu li {
+  opacity: 1;
+  transition: 0.3192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.2s;
+}
+
+.menu-btn {
+  display: none;
+}
+
+.menu-icon {
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  padding: 24px 14px;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+.navicon {
+  background: #ddd;
+  display: block;
+  height: 3px;
+  width: 26px;
+  position: relative;
+  transition: 0.3192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.1008s;
+}
+
+.navicon:before,
+.navicon:after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 100%;
+  position: absolute;
+  background: #ddd;
+  transition: 0.3192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.1008s;
+}
+
+.navicon:before {
+  top: 9px;
+}
+
+.navicon:after {
+  bottom: 9px;
+}
+
+/* Hamburger Menu Animation Start */
+.menu-btn:checked ~ .menu-icon .navicon:before {
+  transform: rotate(-45deg);
+}
+
+.menu-btn:checked ~ .menu-icon .navicon:after {
+  transform: rotate(45deg);
+}
+
+.menu-btn:checked ~ .menu-icon:not(.steps) .navicon:before {
+  top: 0;
+}
+.menu-btn:checked ~ .menu-icon:not(.steps) .navicon:after {
+  bottom: 0;
+}
+
+.menu-btn:checked ~ .menu-icon .navicon {
+  background: rgba(0, 0, 0, 0);
+  transition: 0.2192s cubic-bezier(0.04, 0.04, 0.12, 0.96) 0.1008s;
+}
+/* Hamburger Menu Animation End */
+
+/* Navbar Container */
+.navtext-container {
+  width: 100%;
+  height: 52px;
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Navbar Text */
+.navtext {
+  position: absolute;
+  text-transform: uppercase;
+  color: #ddd;
+  letter-spacing: 4px;
+  font-size: 20px;
+}
+
+.content-container {
+  padding-top: 70px;
+  padding-bottom: 20px;
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+/* プライバシー設定スイッチ用のスタイル */
+.form-check-input {
+  cursor: pointer;
+}
+
+.privacy-setting {
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="header"> 
+  <div class="navtext-container">
+    <div class="navtext">睡眠記録</div> 
+  </div> 
+ <input type="checkbox" class="menu-btn" id="menu-btn"> 
+<label for="menu-btn" class="menu-icon">
+  <span class="navicon"></span></label>
+    <ul class="menu">
+      <!-- 既存のメニュー項目 -->
+      <li><a href="{{ url_for('all_records') }}">みんなの記録</a>
+      <li><a href="{{ url_for('calendar_view') }}">カレンダー</a></li>
+      <!-- 新しいメニュー項目を追加 -->
+      <li><a href="{{ url_for('sleep_graph') }}">睡眠時間グラフ</a>
+      <li><a href="{{ url_for('average_sleep') }}">平均睡眠時間</a></li>
+      <!-- その他の既存項目 -->
+      <li><a href="{{ url_for('logout') }}">ログアウト</a></li>
+  </ul>
+</header>
+<div class="content-container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  {% for category, message in messages %}
+  <div class="alert alert-{{ category }}">{{ message }}</div>
+  {% endfor %} 
+  {% endif %} 
+  {% endwith %}
+  
+  <!-- プライバシー設定 -->
+  <div class="privacy-setting">
+    <form action="{{ url_for('toggle_privacy') }}" method="post" id="privacy-form">
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" role="switch" id="is_private" name="is_private" {% if is_private %}checked{% endif %} onchange="document.getElementById('privacy-form').submit();">
+        <label class="form-check-label" for="is_private">
+          プライベートモード {% if is_private %}(オン){% else %}(オフ){% endif %}
+        </label>
+        <small class="form-text text-muted d-block">
+          {% if is_private %}
+          あなたの記録は他のユーザーには表示されません
+          {% else %}
+          あなたの記録は他のユーザーにも表示されます
+          {% endif %}
+        </small>
+      </div>
+    </form>
+  </div>
+  
+  <!-- 記録フォーム --> 
+  <form action="{{ url_for('record') }}" method="post" class="mb-4">
+    <div class="form-row">
+      <div class="form-group col-md-4">
+        <label for="action">行動選択</label>
+        <select name="action" id="action" class="form-control" required>
+          <option value="wake_up">起床</option>
+          <option value="sleep">就寝</option>
+        </select>
+      </div>
+      <div class="form-group col-md-8">
+        <label for="memo">メモ</label>
+        <textarea name="memo" id="memo" class="form-control" rows="1" maxlength="100"></textarea>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">
+      <i class="fas fa-save"></i> 記録する
+    </button>
+  </form>
+  
+  <!-- 今日の記録 -->
+  <h2>今日の記録</h2>
+  {% if records %}
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>時間</th>
+          <th>行動</th>
+          <th>反応</th>
+          <th>メモ</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody> 
+        {% for record in records %}
+        <tr>
+          <td>
+            {{ record.formatted_date }}
+            {{ record.formatted_time }}
+          </td>
+          <td>
+            {% if record.action == 'wake_up' %}起床{% elif record.action == 'sleep' %}就寝{% else %}{{ record.action }}{% endif %}
+          </td>
+          <td>{{ record.likes_count or 0 }}</td>
+          <td>{{ record.memo if record.memo else '---' }}</td>
+          <td>
+            <form action="{{ url_for('delete_record', record_id=record.id) }}" method="post" onsubmit="return confirm('本当に削除しますか？');">
+              <input type="hidden" name="redirect_to" value="index">
+              <button type="submit" class="btn btn-danger btn-sm">削除</button>
+          </form>          
+          </td>
+        </tr>
+        {% endfor %} 
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert-warning">今日の記録はありません</div> 
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const menuBtn = document.getElementById('menu-btn');
+  const menuItems = document.querySelectorAll('.menu li a');
+  
+  // メニュー項目をクリックしたらメニューを閉じる
+  menuItems.forEach(item => {
+    item.addEventListener('click', function() {
+      menuBtn.checked = false;
+    });
+  });
+});
+</script>
+{% endblock %}
