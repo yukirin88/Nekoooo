@@ -1,0 +1,109 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}{{ date }} の記録{% endblock %}
+{% block content %}
+<div class="container">
+    <h1>{{ date }} の記録　<a href="{{ url_for('calendar_view') }}" class="btn btn-primary mb-3">カレンダーに戻る</a></h1>
+
+    <!-- 右上端に隠しボタン追加 -->
+    <div style="position: fixed; top: 10px; right: 10px; z-index: 100;">
+        <button id="secretButton" onclick="showSecretMessage()" style="background: transparent; border: none; cursor: pointer; opacity: 0.2;">
+            <span style="font-size: 20px; color: #ddd;">★</span>
+        </button>
+    </div>
+
+    {% if sleep_duration is not none %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <h3>今日の睡眠時間: {{ "%.2f"|format(sleep_duration) }} 時間</h3>
+            <h4>今日の評価: {{ sleep_evaluation }}</h4>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if records %}
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>時間</th>
+                    <th>行動</th>
+                    <th>メモ</th>
+                    {% if is_admin %}
+                    <th>状態</th>
+                    {% endif %}
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                    <tr>
+                        <td>{{ record.formatted_time }}</td>
+                        <td>
+                            {% if record.action == 'wake_up' %}
+                                起床
+                            {% elif record.action == 'sleep' %}
+                                就寝
+                            {% else %}
+                                {{ record.action }}
+                            {% endif %}
+                        </td>
+                        <td>{{ record.memo if record.memo else '---' }}</td>
+                        {% if is_admin %}
+                            <td>
+                                {% if record.is_deleted %}
+                                    削除済み
+                                {% else %}
+                                    有効
+                                {% endif %}
+                            </td>
+                        {% endif %}
+                        <td>
+                            {% if not is_admin or (is_admin and session.user_id == record.user_id) %}
+                            <form action="{{ url_for('delete_record', record_id=record.id) }}" method="post" onsubmit="return confirm('この記録を削除してもよろしいですか？');">
+                                <button type="submit" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-trash"></i> 削除
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>この日に記録はありません。</p>
+    {% endif %}
+</div>
+
+<script>
+function showSecretMessage() {
+    var modal = document.getElementById("secretModal");
+    modal.style.display = "block";
+    document.getElementById("secretMessage").innerHTML = `
+    <h3>睡眠時間の評価基準</h3>
+    <ul style="text-align: left; padding-left: 20px;">
+      <li>10時間半以上　寝すぎ⁉</li>
+      <li>9時間以上10時間半未満　ちょい寝すぎ。</li>
+      <li>7時間以上9時間未満　良好だよ</li>
+      <li>6時間以上7時間未満　もうちょい寝たかも</li>
+      <li>3時間半以上6時間未満　頼むこれ以上は...</li>
+      <li>3時間半未満　いい加減もっと寝ろよ！！</li>
+    </ul>
+  `;
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    var closeBtn = document.getElementById("closeModal");
+    var modal = document.getElementById("secretModal");
+    
+    closeBtn.onclick = function() {
+        modal.style.display = "none";
+    }
+    
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = "none";
+        }
+    }
+});
+</script>
+{% endblock %}
