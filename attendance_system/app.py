@@ -651,10 +651,7 @@ def average_sleep():
                     weekly_avg=None,
                     monthly_avg=None,
                     overall_avg=None,
-                    comparisons=None,
-                    period=period,
-                    evaluate_sleep=evaluate_sleep,
-                    round_decimal=round_decimal  # round_decimal関数を渡す
+                    period=period
                 )
 
             # 睡眠時間を計算
@@ -687,13 +684,9 @@ def average_sleep():
 
             # 各種平均値と比較値を計算
             daily_avg = calculate_average(sleep_times)
-            overall_avg = calculate_overall_average(sleep_times)
             weekly_avg = calculate_weekly_average(sleep_times)
             monthly_avg = calculate_monthly_average(sleep_times)
-            comparisons = calculate_comparisons(sleep_times)
-
-            # 降順にソート
-            sleep_times.sort(key=lambda x: x['date'], reverse=True)
+            overall_avg = calculate_overall_average(sleep_times)
 
             return render_template(
                 'average_sleep.html',
@@ -701,26 +694,15 @@ def average_sleep():
                 weekly_avg=weekly_avg,
                 monthly_avg=monthly_avg,
                 overall_avg=overall_avg,
-                comparisons=comparisons,
                 sleep_times=sleep_times,
-                period=period,
-                evaluate_sleep=evaluate_sleep,
-                round_decimal=round_decimal  # round_decimal関数を渡す
+                period=period
             )
 
     except Exception as e:
         app.logger.error(f"エラーが発生しました: {str(e)}")
         return render_template(
-            'average_sleep.html',
-            sleep_times=[],
-            daily_avg=None,
-            weekly_avg=None,
-            monthly_avg=None,
-            overall_avg=None,
-            comparisons=None,
-            period=period,
-            evaluate_sleep=evaluate_sleep,
-            round_decimal=round_decimal  # round_decimal関数を渡す
+            'error.html',
+            error_message="サーバー内部でエラーが発生しました。"
         )
     
 def calculate_average(sleep_times):
