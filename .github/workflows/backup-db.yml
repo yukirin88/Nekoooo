@@ -2,33 +2,39 @@ name: Daily SQLite DB Backup
 
 on:
   schedule:
-    # Runs every day at 0:00 JST (15:00 UTC)
-    - cron: '0 15 * * *'
-  workflow_dispatch:  # Allow manual trigger
+
+    - cron: "0 0 * * *"  # 毎日 0:00 UTC（日本時間 9:00）
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # ✅ GITHUB_TOKEN が push 権限を持てるように
+
     steps:
-      - name: Checkout repository
+
+      - name: Git config
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'actions@github.com'
+
+      - name: Checkout main
         uses: actions/checkout@v3
         with:
+          fetch-depth: 0  # ✅ 全履歴取得（ブランチ作成に必要）
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-          persist-credentials: true  # ← 認証情報を維持
+      - name: Generate backup file name
+        run: echo "BACKUP_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
 
+      - name: Copy DB
+        run: cp attendance.db ${{ env.BACKUP_NAME }}
 
-      - name: Set current date (UTC)
-        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
-
-      - name: Copy SQLite DB with date suffix
+      - name: Commit and push to db-backup
         run: |
-          cp attendance.db attendance_${{ env.DATE }}.db
-
-      - name: Switch to db-backup branch
-        run: |
-
-          DATE=$(date -u +"%Y-%m-%d")
           git switch -c db-backup || git switch db-backup
-          git add "attendance_$DATE.db"
-          git commit -m "Auto backup $DATE" || echo "Nothing to commit"
+          git add ${{ env.BACKUP_NAME }}
+          git commit -m "Auto backup $(date -u)" || echo "No changes to commit"
           git push origin db-backup
