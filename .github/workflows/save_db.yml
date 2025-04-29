@@ -22,4 +22,4 @@ jobs:
           git checkout -B db-backup
           git add attendance.db
           git commit -m "Auto backup $(date)"
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
