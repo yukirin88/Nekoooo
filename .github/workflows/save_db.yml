@@ -9,8 +9,11 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
+      - name: Get date-based filename
+        run: echo "DB_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
+
       - name: Download current DB from Render
-        run: curl -o attendance.db https://yukirin-github-io-nekooo.onrender.com/attendance.db
+        run: curl -o $DB_NAME https://yukirin-github-io-nekooo.onrender.com/attendance.db
 
       - name: Commit DB to backup branch
         run: |
@@ -20,6 +23,6 @@ jobs:
           git remote add origin https://github.com/yukirin88/Nekoooo.git
           git fetch
           git checkout -B db-backup
-          git add attendance.db
+          git add $DB_NAME
           git commit -m "Auto backup $(date)"
           git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
