@@ -11,8 +11,9 @@ BRANCH="db-backup"
 echo "🔍 Getting latest backup DB filename from GitHub..."
 
 LATEST_DB=$(curl -s -H "Authorization: token $TOKEN" \
-  "https://api.github.com/repos/$REPO/contents/?ref=$BRANCH" | \
-  jq -r '.[] | select(.name | test("^attendance_.*\\.db$")) | .name' | sort -r | head -n 1)
+                 -H "Accept: application/vnd.github.v3+json" \
+  "https://api.github.com/repos/$REPO/contents?ref=$BRANCH" | \
+  jq -r '.[] | select(.type == "file" and .name | test("^attendance_.*\\.db$")) | .name' | sort -r | head -n 1)
 
 if [ -z "$LATEST_DB" ]; then
   echo "⚠️ No backup DB found. Starting fresh."
