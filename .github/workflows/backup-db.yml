@@ -1,34 +1,41 @@
-name: Backup SQLite DB (manual & scheduled)
+name: Daily SQLite DB Backup
 
 on:
-  workflow_dispatch:  # 手動実行
   schedule:
-    - cron: '0 15 * * *'  # 毎日 JST 0:00（UTC+9 → UTC 15:00）
+    # Runs every day at 0:00 JST (15:00 UTC)
+    - cron: '0 15 * * *'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
-          persist-credentials: true  # ← 認証情報を維持（これが超重要！）
+          fetch-depth: 0  # fetch all history for branches
 
-      - name: Set up Git
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
+      - name: Set current date (UTC)
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Create timestamped DB copy
+      - name: Copy SQLite DB with date suffix
         run: |
-          DATE=$(date -u +"%Y-%m-%d")
-          cp attendance.db "attendance_$DATE.db"
+          cp attendance.db attendance_${{ env.DATE }}.db
 
-      - name: Commit and push to db-backup
+      - name: Switch to db-backup branch
         run: |
-          DATE=$(date -u +"%Y-%m-%d")
-          git switch -c db-backup || git switch db-backup
-          git add "attendance_$DATE.db"
-          git commit -m "Auto backup $DATE" || echo "Nothing to commit"
-          git push origin db-backup
+          git fetch origin db-backup || true
+          git checkout db-backup || git checkout -b db-backup
+
+      - name: Commit backup
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add attendance_${{ env.DATE }}.db
+          git commit -m "chore(db): backup attendance_${{ env.DATE }}.db" || echo "No changes to commit"
+
+      - name: Push to db-backup
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: db-backup
