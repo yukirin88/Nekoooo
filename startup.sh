@@ -7,6 +7,7 @@ RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
 
 echo "🧪 GitHub API response:"
 echo "$RESPONSE"
+echo "🧪 TOKEN value check: ${#TOKEN} characters"
 
 # jq処理（念のため防御付き）
 LATEST_DB=$(echo "$RESPONSE" | jq -r 'select(type == "array") | .[] | select(.name | test("^attendance_.*\\.db$")) | .name' | sort -r | head -n 1)
