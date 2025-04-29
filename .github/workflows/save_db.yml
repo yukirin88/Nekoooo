@@ -2,8 +2,8 @@ name: Daily Backup DB
 
 on:
   schedule:
-    - cron: '0 15 * * *'  # 毎日0時(JST)
-  workflow_dispatch:
+    - cron: '0 15 * * *'  # 毎日0時 (JST) に実行
+  workflow_dispatch:      # 手動実行も可能
 
 jobs:
   backup:
@@ -11,36 +11,21 @@ jobs:
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v3
-        with:
-          ref: main  # mainブランチからチェックアウト
-
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: 📦 Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: 🗃️ Initialize database
-        run: |
-          python -c "from attendance_system.app import init_db; init_db()"
 
       - name: 🕓 Set current date
         run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
       - name: 💾 Create backup file
-        run: |
-          cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
+        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
 
-      - name: 🚀 Push to db-backup branch
+      - name: 🧪 Debug backup file list
+        run: ls -l *.db
+
+      - name: 🚀 Push to db-backup branch using PAT
         run: |
           git config --global user.email "github-actions@example.com"
           git config --global user.name "github-actions"
-          git fetch origin db-backup
-          git checkout -B db-backup origin/db-backup
+          git checkout -B db-backup
           git add "attendance_${{ env.DATE }}.db"
           git commit -m "Auto backup ${{ env.DATE }}"
-          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup

@@ -1,145 +1,44 @@
+# app.pyの先頭に追加
 from decimal import Decimal, ROUND_HALF_UP
 
-def round_decimal(value, places=2):
-    """指定された小数点以下の桁数で四捨五入する"""
-    if value is None:
-        return None
-    
-    value_str = str(value)
-    quantize_str = '0.' + '0' * places
-    
-    return float(Decimal(value_str).quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP))
-
+def round_decimal(value, precision=0):
+    """Decimalクラスを使用して正確な四捨五入を行う"""
+    quantize_value = Decimal(f"1.{'0' * precision}")
+    return Decimal(str(value)).quantize(quantize_value, rounding=ROUND_HALF_UP)
 import sys
 import os
-import shutil
-import tempfile
-import subprocess
-
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_bootstrap import Bootstrap
+from flask import jsonify
 from flask_cors import CORS
-
 from datetime import datetime, timedelta
 from functools import wraps
 import sqlite3
 import hashlib
 import calendar
 import pytz
+import os
 import psycopg2
 from psycopg2.extras import DictCursor
 
-import os
-import requests
-
-def restore_db_from_github():
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
-    if not token:
-        print("GitHubトークンが設定されていません。DBの自動復元をスキップします。")
-        return
-    api_url = "https://api.github.com/repos/yukirin88/Nekoooo/contents?ref=db-backup"
-    headers = {"Authorization": f"token {token}"}
-    resp = requests.get(api_url, headers=headers)
-    if resp.status_code != 200:
-        print("GitHub APIからバックアップ一覧の取得に失敗:", resp.text)
-        return
-    files = resp.json()
-    db_files = [f for f in files if f["name"].startswith("attendance_") and f["name"].endswith(".db")]
-    if not db_files:
-        print("バックアップDBが見つかりません")
-        return
-    # ファイル名で降順ソート（最新が一番上）
-    latest_db = sorted(db_files, key=lambda x: x["name"], reverse=True)[0]
-    download_url = latest_db["download_url"]
-    db_content = requests.get(download_url, headers=headers).content
-    db_path = os.path.join(os.path.dirname(__file__), "attendance.db")
-    with open(db_path, "wb") as f:
-        f.write(db_content)
-    print(f"DBをGitHubバックアップ({latest_db['name']})から復元しました")
-
-# アプリ起動時に一度だけ自動復元
-restore_db_from_github()
-
-# セッション設定・DBパスなどの定義
+# 環境変数からデータベースURLを取得
 DATABASE_URL = os.environ.get('DATABASE_URL')
-DATABASE_URL = None  # SQLite を使う
-RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
-DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
-GIT_USER_EMAIL = "konosuke.hirata@gmail.com"
-GIT_USER_NAME = "yukirin88"
-TIMEZONE = pytz.timezone('Asia/Tokyo')
+# DATABASE_URL = os.environ.get('DATABASE_URL')  ← 一時的にコメントアウト
+DATABASE_URL = None  # ← SQLite を使わせる
 
-def ensure_db_directory_exists(db_path):
-    db_dir = os.path.dirname(db_path)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir)
 
-def get_db_connection():
-    ensure_db_directory_exists(DATABASE_PATH)
-    return sqlite3.connect(DATABASE_PATH)
-
-def is_db_empty(db_path):
-    """DBが空かどうかをチェックする関数"""
-    if not os.path.exists(db_path):
-        return True
-    try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if not cur.fetchone():
-            return True
-        cur.execute("SELECT COUNT(*) FROM users")
-        if cur.fetchone()[0] == 0:
-            return True
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'")
-        if not cur.fetchone():
-            return True
-        cur.execute("SELECT COUNT(*) FROM records")
-        if cur.fetchone()[0] == 0:
-            return True
-        return False
-    except Exception:
-        return True
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
-def backup_db_to_github():
-    """GitHubにDBをバックアップする関数"""
-    if is_db_empty(DATABASE_PATH):
-        print("DBが空のためバックアップをスキップします")
-        return
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
-    if not token:
-        print("GitHubトークンが設定されていません")
-        return
-    try:
-        subprocess.run(['git', 'config', '--global', 'user.email', GIT_USER_EMAIL], check=True)
-        subprocess.run(['git', 'config', '--global', 'user.name', GIT_USER_NAME], check=True)
-        today = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
-        backup_filename = f"attendance_{today}.db"
-        backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
-        shutil.copyfile(DATABASE_PATH, backup_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_url = f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git"
-            subprocess.run(["git", "clone", "--branch", "db-backup", repo_url, tmpdir], check=True)
-            dst = os.path.join(tmpdir, backup_filename)
-            shutil.copyfile(backup_path, dst)
-            subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
-            subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "pull", "origin", "db-backup"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "push", "origin", "db-backup"], cwd=tmpdir, check=True)
-        print("バックアップをGitHubにpushしました")
-    except subprocess.CalledProcessError as e:
-        print(f"バックアップ処理中にエラーが発生しました: {str(e)}")
-    except Exception as e:
-        print(f"予期せぬエラーが発生しました: {str(e)}")
-
+# アプリケーションの初期化
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
 CORS(app)
+
+# セッション設定
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
+DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
+
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -147,6 +46,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=2)
 )
 
+# ユーティリティ関数
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
@@ -394,57 +294,35 @@ def calculate_monthly_average(sleep_times):
     monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return monthly_avgs
 
-def format_hour_minute(hours_float):
-    """小数点の時間を「〇〇時間〇〇分」形式に変換"""
-    sign = "-" if hours_float < 0 else ""
-    hours_abs = abs(hours_float)
-    h = int(hours_abs)
-    m = int(round((hours_abs - h) * 60))
-    if m == 60:
-        h += 1
-        m = 0
-    return f"{sign}{h}時間{m:02d}分"
-
-def calculate_diff(sorted_times, current_idx, compare_idx):
-    """2つの睡眠時間の差分を計算"""
-    if not sorted_times or compare_idx is None or current_idx >= len(sorted_times) or compare_idx >= len(sorted_times):
-        return {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
-    current = sorted_times[current_idx]['duration']
-    compare = sorted_times[compare_idx]['duration']
-    diff = current - compare
-    is_increase = diff > 0
-    diff_abs = abs(diff)
-    diff_hours = int(diff_abs)
-    diff_minutes = int((diff_abs - diff_hours) * 60)
-    if diff_minutes == 60:
-        diff_hours += 1
-        diff_minutes = 0
-    diff_str = format_hour_minute(diff)
-    return {
-        'diff_hours': diff_hours,
-        'diff_minutes': diff_minutes,
-        'is_increase': is_increase,
-        'diff_str': diff_str
-    }
-
 def calculate_comparisons(sleep_times):
     """前日比、先週比、先月比を計算"""
     if not sleep_times:
         return {
-            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"},
-            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"},
-            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
+            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
+            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
+            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
         }
+    
+    # 日付でソート
     sorted_times = sorted(sleep_times, key=lambda x: x['date'], reverse=True)
+    
+    # 現在の日付を取得（sorted_times[0]['date']がすでにdatetime.dateオブジェクト）
     today = sorted_times[0]['date']
+    
+    # 前日比
     yesterday_diff = calculate_diff(sorted_times, 0, 1)
+    
+    # 先週比（同じ曜日）
     last_week_idx = next((i for i, item in enumerate(sorted_times) if (today - item['date']).days >= 7 and today.weekday() == item['date'].weekday()), None)
-    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx is not None else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
+    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
+    
+    # 先月比（同じ日）
     last_month_day = today.day
     last_month = today.month - 1 if today.month > 1 else 12
     last_month_year = today.year if today.month > 1 else today.year - 1
     last_month_idx = next((i for i, item in enumerate(sorted_times) if item['date'].year == last_month_year and item['date'].month == last_month and item['date'].day == last_month_day), None)
-    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx is not None else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
+    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
+    
     return {
         'yesterday': yesterday_diff,
         'last_week': last_week_diff,
@@ -533,6 +411,7 @@ def like_record(record_id):
     
     try:
         with get_db_connection() as conn:
+            # すでにいいね済みか確認
             existing_like = conn.execute(
                 'SELECT id FROM likes WHERE user_id = ? AND record_id = ?',
                 (session['user_id'], record_id)
@@ -541,26 +420,24 @@ def like_record(record_id):
             if existing_like:
                 flash('すでにいいね済みです。', 'info')
             else:
+                # likesテーブルに新しいいいねを追加
                 conn.execute(
                     'INSERT INTO likes (user_id, record_id, timestamp) VALUES (?, ?, ?)',
                     (session['user_id'], record_id, jst_now())
                 )
+                
+                # recordsテーブルのlikes_countを更新
                 conn.execute(
                     'UPDATE records SET likes_count = likes_count + 1 WHERE id = ?',
                     (record_id,)
                 )
+                
                 conn.commit()
-                
-                # バックアップ
-                try:
-                    backup_db_to_github()
-                except Exception as e:
-                    app.logger.error(f"バックアップに失敗しました: {e}")
-                
                 flash('いいねしました！', 'success')
     except sqlite3.Error as e:
         flash(f'エラーが発生しました: {e}', 'error')
     
+    # from_pageに基づいてリダイレクト
     if from_page == 'index':
         return redirect(url_for('index'))
     elif from_page == 'all_records':
@@ -657,13 +534,7 @@ def register():
                 (username, hash_password(password), int(is_private))
             )
             conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
+            
         flash('登録しました！', 'success')
         return redirect(url_for('login'))
         
@@ -692,13 +563,6 @@ def reset_password():
                     (hash_password(new_password), username)
                 )
                 conn.commit()
-                
-                # バックアップ
-                try:
-                    backup_db_to_github()
-                except Exception as e:
-                    app.logger.error(f"バックアップに失敗しました: {e}")
-                
                 flash('パスワードが更新されました。ログインしてください。', 'success')
                 return redirect(url_for('login'))
             else:
@@ -718,59 +582,43 @@ def logout():
 def record():
     action = request.form.get('action')
     memo = request.form.get('memo', '')
-
+    
     if not action or action not in ['wake_up', 'sleep']:
         flash('有効な行動を選択してください', 'danger')
         return redirect(url_for('index'))
 
     try:
+        # 日本時間のタイムスタンプを明示的に生成
         timestamp = datetime.now(pytz.timezone('Asia/Tokyo'))
+        
         with get_db_connection() as conn:
-            # 既存レコード数をカウント
-            count_query = '''
-                SELECT COUNT(*) FROM records
+            # 同じ日に同じアクションの記録があるかチェック
+            existing_record = conn.execute('''
+                SELECT * FROM records
                 WHERE user_id = ? AND action = ? AND DATE(timestamp, '+9 hours') = DATE(?, '+9 hours')
                 AND is_deleted = 0
-            '''
-            existing_count = conn.execute(
-                count_query,
-                (session['user_id'], action, timestamp.isoformat())
-            ).fetchone()[0]
+            ''', (session['user_id'], action, timestamp.isoformat())).fetchone()
 
-            # 制限判定
-            if action == 'sleep' and existing_count >= 2:
-                flash('本日は2回までしか就寝記録できません。', 'warning')
-                return redirect(url_for('index'))
-            elif action == 'wake_up' and existing_count >= 1:
-                flash('本日は1回までしか起床記録できません。', 'warning')
+            if existing_record:
+                flash('既に本日分は登録されています', 'warning')
                 return redirect(url_for('index'))
 
-            # 記録を追加
             conn.execute('BEGIN TRANSACTION')
+            # レコード挿入
             conn.execute(
                 '''INSERT INTO records
                 (user_id, action, timestamp, memo)
                 VALUES (?, ?, ?, ?)''',
                 (session['user_id'], action, timestamp.isoformat(), memo)
             )
+            # トランザクションコミット
             conn.commit()
             flash('記録が正常に保存されました', 'success')
-
-        # 記録ごとにバックアップ（DB接続の外で実行するのが安全です）
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-            flash('バックアップに失敗しました', 'warning')
-
     except sqlite3.Error as e:
+        conn.rollback()
         error_message = f'データベースエラー: {str(e)}'
         app.logger.error(error_message)
         flash(error_message, 'danger')
-        try:
-            conn.rollback()
-        except Exception:
-            pass
     except Exception as e:
         error_message = f'予期せぬエラー: {str(e)}'
         app.logger.error(error_message)
@@ -782,7 +630,9 @@ def record():
 @login_required
 def average_sleep():
     try:
+        # デフォルト値を「日別」に設定
         period = request.args.get('period', 'daily')
+
         with get_db_connection() as conn:
             data = conn.execute('''
                 SELECT date(timestamp, '+9 hours') as date,
@@ -790,59 +640,64 @@ def average_sleep():
                        timestamp
                 FROM records
                 WHERE user_id = ? AND is_deleted = 0
-                  AND (action = 'sleep' OR action = 'wake_up')
+                      AND (action = 'sleep' OR action = 'wake_up')
                 ORDER BY timestamp
             ''', (session['user_id'],)).fetchall()
 
             if not data:
-                # データがない場合はエラーにせず、空リストやデフォルト値で描画
                 return render_template(
                     'average_sleep.html',
-                    has_records=False,
                     sleep_times=[],
-                    daily_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
-                    weekly_avg=[],
-                    monthly_avg=[],
-                    overall_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
+                    daily_avg=None,
+                    weekly_avg=None,
+                    monthly_avg=None,
+                    overall_avg=None,
                     comparisons=None,
                     period=period,
                     evaluate_sleep=evaluate_sleep,
-                    round_decimal=round_decimal
+                    round_decimal=round_decimal  # round_decimal関数を渡す
                 )
 
-            # --- ここからは記録が1件以上ある場合の既存処理 ---
+            # 睡眠時間を計算
             sleep_times = []
             sleep_start = None
+
             for row in data:
                 if row['action'] == 'sleep':
                     sleep_start = datetime.fromisoformat(row['timestamp'])
                 elif row['action'] == 'wake_up' and sleep_start:
                     wake_time = datetime.fromisoformat(row['timestamp'])
-                    sleep_duration = (wake_time - sleep_start).total_seconds() / 3600
+                    sleep_duration = (wake_time - sleep_start).total_seconds() / 3600  # 時間単位
+
+                    # 時間と分に分割
                     sleep_hours = int(sleep_duration)
                     sleep_minutes = int((sleep_duration - sleep_hours) * 60)
+
                     sleep_date = datetime.fromisoformat(row['timestamp']).date()
                     sleep_times.append({
                         'date': sleep_date,
                         'duration': sleep_duration,
                         'hours': sleep_hours,
                         'minutes': sleep_minutes,
-                        'week': sleep_date.isocalendar()[1],
+                        'week': sleep_date.isocalendar()[1],  # ISO週番号
                         'month': sleep_date.month,
                         'year': sleep_date.year
                     })
+
                     sleep_start = None
 
+            # 各種平均値と比較値を計算
             daily_avg = calculate_average(sleep_times)
             overall_avg = calculate_overall_average(sleep_times)
             weekly_avg = calculate_weekly_average(sleep_times)
             monthly_avg = calculate_monthly_average(sleep_times)
             comparisons = calculate_comparisons(sleep_times)
+
+            # 降順にソート
             sleep_times.sort(key=lambda x: x['date'], reverse=True)
 
             return render_template(
                 'average_sleep.html',
-                has_records=True,
                 daily_avg=daily_avg,
                 weekly_avg=weekly_avg,
                 monthly_avg=monthly_avg,
@@ -851,36 +706,38 @@ def average_sleep():
                 sleep_times=sleep_times,
                 period=period,
                 evaluate_sleep=evaluate_sleep,
-                round_decimal=round_decimal
+                round_decimal=round_decimal  # round_decimal関数を渡す
             )
+        
+        return render_template(
+            'average_sleep.html',
+            sleep_times=[],
+            daily_avg=None,
+            weekly_avg=None,
+            monthly_avg=None,
+            overall_avg=None,
+            comparisons=None,
+            period=period,
+            evaluate_sleep=evaluate_sleep,
+            round_decimal=round_decimal  # round_decimal関数を渡す
+        )
     except Exception as e:
-        app.logger.error(f"平均睡眠時間ページでエラーが発生しました: {str(e)}")
-        flash("平均睡眠時間ページでエラーが発生しました。管理者に連絡してください。", "danger")
+        app.logger.error(f"エラーが発生しました: {str(e)}")
+        flash("データの取得に失敗しました。再度お試しください。", "danger")
         return redirect(url_for('index'))
-
-def calculate_average(sleep_times):
-    if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
-    total_sleep = sum(item['duration'] for item in sleep_times)
-    avg_sleep = total_sleep / len(sleep_times)
-    avg_hours = int(avg_sleep)
-    avg_minutes = int((avg_sleep - avg_hours) * 60)
-    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
-    return {
-        'avg_hours': avg_hours,
-        'avg_minutes': avg_minutes,
-        'avg_duration': avg_sleep,
-        'evaluation': evaluation
-    }
-
+    
+    
 def calculate_overall_average(sleep_times):
+    """全ての記録の平均睡眠時間を計算"""
     if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
+        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "データなし"}
+    
     total_sleep = sum(item['duration'] for item in sleep_times)
     avg_sleep = total_sleep / len(sleep_times)
     avg_hours = int(avg_sleep)
     avg_minutes = int((avg_sleep - avg_hours) * 60)
-    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
+    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "評価不可"
+    
     return {
         'avg_hours': avg_hours,
         'avg_minutes': avg_minutes,
@@ -965,6 +822,7 @@ def calculate_monthly_average(sleep_times):
     return monthly_avgs
 
 def calculate_comparisons(sleep_times):
+    """前日比、先週比、先月比を計算"""
     if not sleep_times:
         return {
             'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
@@ -1250,51 +1108,48 @@ def toggle_privacy():
         
     return redirect(url_for('index'))
 
-@app.route('/delete_record/<int:record_id>', methods=['POST'])
+@app.route('/delete_record/<int:record_id>', methods=['POST'])  # パラメータを明示的に指定
 @login_required
-def delete_record(record_id):
+def delete_record(record_id):  # パラメータを受け取る
+    # 既存のコード
     try:
+        # リダイレクト先を取得（デフォルトはday_records）
         redirect_to = request.form.get('redirect_to', 'day_records')
         
         with get_db_connection() as conn:
-            record = conn.execute(
-                '''
+            # 記録が自分のものかチェック
+            record = conn.execute('''
                 SELECT * FROM records
                 WHERE id = ? AND user_id = ?
-                ''', (record_id, session['user_id'])
-            ).fetchone()
+            ''', (record_id, session['user_id'])).fetchone()
             
             if not record:
                 flash('記録が見つからないか、削除権限がありません。', 'error')
                 return redirect(url_for('index'))
             
+            # 記録の日付を取得
             record_date = datetime.fromisoformat(record['timestamp']).date()
             
-            conn.execute(
-                '''
+            # 記録を論理削除
+            conn.execute('''
                 UPDATE records
                 SET is_deleted = 1
                 WHERE id = ? AND user_id = ?
-                ''', (record_id, session['user_id'])
-            )
+            ''', (record_id, session['user_id']))
             conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
-        flash('記録が削除されました。', 'success')
-        
-        if redirect_to == 'index':
-            return redirect(url_for('index'))
-        elif redirect_to == 'all_records':
-            page = request.form.get('page', 1)
-            user_filter = request.form.get('user_filter', 'all')
-            return redirect(url_for('all_records', page=page, user_id=user_filter))
-        else:
-            return redirect(url_for('day_records', date=record_date.strftime('%Y-%m-%d')))
+            
+            flash('記録が削除されました。', 'success')
+            
+            # リダイレクト先の判断
+            if redirect_to == 'index':
+                return redirect(url_for('index'))
+            elif redirect_to == 'all_records':
+                # ページ番号とユーザーフィルターを保持
+                page = request.form.get('page', 1)
+                user_filter = request.form.get('user_filter', 'all')
+                return redirect(url_for('all_records', page=page, user_id=user_filter))
+            else:
+                return redirect(url_for('day_records', date=record_date.strftime('%Y-%m-%d')))
                 
     except sqlite3.Error as e:
         flash(f'記録の削除中にエラーが発生しました: {e}', 'error')
@@ -1416,12 +1271,6 @@ def admin_add_record():
             
             conn.commit()
 
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-
         # 該当ユーザーに通知メッセージを設定
         session[f'user_{user_id}_message'] = "管理者が記録を追加しました。"
 
@@ -1436,29 +1285,29 @@ def admin_add_record():
 def admin_delete_record(record_id):
     try:
         with get_db_connection() as conn:
+            # 記録が存在するか確認
             record = conn.execute('SELECT * FROM records WHERE id = ?', (record_id,)).fetchone()
             if not record:
                 flash('記録が見つかりません。', 'error')
                 return redirect(url_for('admin_dashboard'))
 
+            # 記録を論理削除
             conn.execute('UPDATE records SET is_deleted = 1 WHERE id = ?', (record_id,))
             conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
-        flash('記録が削除されました。', 'success')
+
+            flash('記録が削除されました。', 'success')
+
+        # 削除後、ユーザーの「記録を見る」画面にリダイレクト
         return redirect(url_for('admin_user_records', user_id=record['user_id']))
     except Exception as e:
         flash(f'記録削除中にエラーが発生しました: {e}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
-@app.route('/delete_user/<int:user_id>', methods=['POST'])
+@app.route('/delete_user/<int:user_id>', methods=['POST'])  # パラメータを明示的に指定
 @admin_required
-def delete_user(user_id):
+def delete_user(user_id):  # パラメータを受け取る
+    # 既存のコード
+    # 関数の内容
     # 自分自身は削除できない
     if user_id == session.get('user_id'):
         flash('自分自身を削除することはできません。', 'error')
@@ -1489,13 +1338,7 @@ def delete_user(user_id):
             
             # トランザクションコミット
             conn.commit()
-
-            # バックアップ
-            try:
-                backup_db_to_github()
-            except Exception as e:
-                app.logger.error(f"バックアップに失敗しました: {e}")
-
+            
             flash('ユーザーが削除されました。', 'success')
         except sqlite3.Error as e:
             # エラー時はロールバック

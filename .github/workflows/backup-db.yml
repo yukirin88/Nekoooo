@@ -3,59 +3,29 @@ name: Backup SQLite DB (manual & scheduled)
 on:
   workflow_dispatch:  # 手動実行
   schedule:
-<<<<<<< HEAD
     - cron: '0 15 * * *'  # 毎日0時 JST（UTC 15時）
-  workflow_dispatch:      # 手動実行も可能
->>>>>>> 58e19c4 (Fix: use GITHUB_TOKEN to push backups)
-=======
-    - cron: '0 15 * * *'  # 毎日 JST 0:00（UTC+9 → UTC 15:00）
->>>>>>> 53151b6 (Fix: use GITHUB_TOKEN for backup push)
 
 jobs:
   backup:
     runs-on: ubuntu-latest
 
     steps:
-<<<<<<< HEAD
-      - name: ⬇️ Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: 🕓 Set current date
-        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
-
-      - name: Set current date
-        run: echo "DATE=$(date '+%Y%m%d')" >> $GITHUB_ENV
-
-      - name: Copy DB file with date
-        run: cp attendance.db attendance_${{ env.DATE }}.db
-
-      - name: Commit and push backup
-=======
-      - name: Set up Git
->>>>>>> 53151b6 (Fix: use GITHUB_TOKEN for backup push)
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true  # ← これが大事！
+          persist-credentials: true
 
-      - name: Create timestamped DB copy
-        run: |
-          DATE=$(date -u +"%Y-%m-%d")
-          cp attendance.db "attendance_$DATE.db"
+      - name: Set current date
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Commit and push
+      - name: Copy DB file with date
+        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
+
+      - name: Commit and push backup
         run: |
-          DATE=$(date -u +"%Y-%m-%d")
-          git switch -c db-backup || git switch db-backup
-          git add "attendance_$DATE.db"
-          git commit -m "Auto backup $DATE" || echo "No changes to commit"
-          git push origin db-backup
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
->>>>>>> 58e19c4 (Fix: use GITHUB_TOKEN to push backups)
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git checkout -B db-backup
+          git add "attendance_${{ env.DATE }}.db"
+          git commit -m "Auto backup ${{ env.DATE }}" || echo "No changes to commit"
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
