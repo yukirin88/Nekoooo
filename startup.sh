@@ -1,17 +1,32 @@
+#!/bin/bash
+
+echo "🔧 Installing jq (if not already installed)..."
+apt-get update && apt-get install -y jq
+
 echo "🔍 Getting latest backup DB filename from GitHub..."
 
-# ✅ 最初に代入（本番では $GITHUB_TOKEN を使う）
 TOKEN=$GITHUB_TOKEN
-# TOKEN=$GITHUB_TOKEN ← Render上で使うときはこちら
+REPO="yukirin88/Nekoooo"
+BRANCH="db-backup"
 
-# デバッグ用：レスポンス内容を表示して中身確認
+# ✅ API URLの修正点： /contents/ の末尾に / をつける
 RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
                   -H "Accept: application/vnd.github.v3+json" \
-                  "https://api.github.com/repos/$REPO/contents?ref=$BRANCH")
+                  "https://api.github.com/repos/$REPO/contents/?ref=$BRANCH")
 
 echo "🧪 TOKEN value check: ${#TOKEN} characters"
-echo "🧪 GitHub API response:"
-echo "$RESPONSE"
+echo "🧪 GitHub API response (truncated):"
+echo "$RESPONSE" | head -n 20
 
-# jq処理（念のため防御付き）
 LATEST_DB=$(echo "$RESPONSE" | jq -r 'select(type == "array") | .[] | select(.name | test("^attendance_.*\\.db$")) | .name' | sort -r | head -n 1)
+
+if [ -z "$LATEST_DB" ]; then
+  echo "⚠️ No backup DB found. Starting fresh."
+else
+  echo "✅ Found backup: $LATEST_DB. Downloading..."
+  curl -s -H "Authorization: token $TOKEN" \
+       -o attendance.db \
+       "https://raw.githubusercontent.com/$REPO/$BRANCH/$LATEST_DB"
+fi
+
+gunicorn attendance_system.app:app
