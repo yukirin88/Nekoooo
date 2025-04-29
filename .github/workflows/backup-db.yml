@@ -1,34 +1,28 @@
-name: Auto DB Backup
+name: Manual DB Backup
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # 毎日0時UTC（日本時間9時）
-  workflow_dispatch:  # 手動でも実行可
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Git
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@users.noreply.github.com'
+      - name: Set current date as env var
+        run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
       - name: Create backup file
-        run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%d")
-          cp attendance.db "attendance_${TIMESTAMP}.db"
+        run: cp attendance.db "attendance_${{ env.DATE }}.db"
 
-      - name: Commit and push
+      - name: Commit and push backup
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%d")
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
           git checkout -B db-backup
-          git add "attendance_${TIMESTAMP}.db"
-          git commit -m "Auto backup $TIMESTAMP"
+          git add "attendance_${{ env.DATE }}.db"
+          git commit -m "Auto backup ${{ env.DATE }}"
           git push "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" db-backup
