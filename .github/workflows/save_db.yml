@@ -1,28 +1,32 @@
-name: Backup SQLite DB
+name: Daily Backup DB
 
 on:
+  # 毎日0時(JST)に実行
   schedule:
-    - cron: '0 0 * * *'  # 毎日0時に実行
-  workflow_dispatch:
+    - cron: '0 15 * * *' # 毎日0時 (JST) に実行
+  workflow_dispatch: # 手動実行も可能
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Get date-based filename
-        run: echo "DB_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v3
 
-      - name: Download current DB from Render
-        run: curl -o $DB_NAME https://yukirin-github-io-nekooo.onrender.com/attendance.db
+      - name: 🕓 Set current date
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Commit DB to backup branch
+      - name: 💾 Create backup file
+        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
+
+      - name: 🧪 Debug backup file list
+        run: ls -l *.db
+
+      - name: 🚀 Push to db-backup branch using PAT
         run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git init
-          git remote add origin https://github.com/yukirin88/Nekoooo.git
-          git fetch
+          git config --global user.email "github-actions@example.com"
+          git config --global user.name "github-actions"
           git checkout -B db-backup
-          git add $DB_NAME
-          git commit -m "Auto backup $(date)"
-          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
+          git add "attendance_${{ env.DATE }}.db"
+          git commit -m "Auto backup ${{ env.DATE }}"
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
