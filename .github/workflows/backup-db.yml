@@ -10,27 +10,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # ← 認証情報を維持（これが超重要！）
+
       - name: Set up Git
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true  # ← これが大事！
 
       - name: Create timestamped DB copy
         run: |
           DATE=$(date -u +"%Y-%m-%d")
           cp attendance.db "attendance_$DATE.db"
 
-      - name: Commit and push
+      - name: Commit and push to db-backup
         run: |
           DATE=$(date -u +"%Y-%m-%d")
           git switch -c db-backup || git switch db-backup
           git add "attendance_$DATE.db"
-          git commit -m "Auto backup $DATE" || echo "No changes to commit"
+          git commit -m "Auto backup $DATE" || echo "Nothing to commit"
           git push origin db-backup
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
