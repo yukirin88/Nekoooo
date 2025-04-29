@@ -1,32 +1,32 @@
-name: Backup SQLite DB (manual & scheduled)
+name: Daily SQLite DB Backup
 
 on:
-  workflow_dispatch:  # 手動実行
   schedule:
-    - cron: '0 15 * * *'  # 毎日 JST 0:00（UTC+9 → UTC 15:00）
+    # Runs every day at 0:00 JST (15:00 UTC)
+    - cron: '0 15 * * *'
+  workflow_dispatch:  # Allow manual trigger
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
+
           persist-credentials: true  # ← 認証情報を維持
 
-      - name: Set up Git
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
 
-      - name: Create timestamped DB copy
-        run: |
-          DATE=$(date -u +"%Y-%m-%d")
-          cp attendance.db "attendance_$DATE.db"
+      - name: Set current date (UTC)
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Commit and push to db-backup
+      - name: Copy SQLite DB with date suffix
         run: |
+          cp attendance.db attendance_${{ env.DATE }}.db
+
+      - name: Switch to db-backup branch
+        run: |
+
           DATE=$(date -u +"%Y-%m-%d")
           git switch -c db-backup || git switch db-backup
           git add "attendance_$DATE.db"
