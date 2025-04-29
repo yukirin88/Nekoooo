@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-name: Manual Backup DB
-
-on:
-  workflow_dispatch:
-=======
 # .github/workflows/backup-db.yml
 name: Backup SQLite DB to db-backup
 
@@ -26,22 +20,6 @@ jobs:
       - name: 🕓 Set current date
         run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-<<<<<<< HEAD
-      - name: 💾 Create backup file
-        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
-
-      - name: 🧪 Debug backup file list
-        run: ls -l *.db
-
-      - name: 🚀 Push to db-backup branch using PAT
-        run: |
-          git config --global user.email "github-actions@example.com"
-          git config --global user.name "github-actions"
-          git checkout -B db-backup
-          git add "attendance_${{ env.DATE }}.db"
-          git commit -m "Auto backup ${{ env.DATE }}"
-          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
-=======
       - name: Set current date
         run: echo "DATE=$(date '+%Y%m%d')" >> $GITHUB_ENV
 
