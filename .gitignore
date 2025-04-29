@@ -1,5 +1,6 @@
-# SQLite DB（GitHub管理に任せる）
+# SQLite
 *.db
+!attendance_*.db
 
 # Pythonキャッシュ
 __pycache__/

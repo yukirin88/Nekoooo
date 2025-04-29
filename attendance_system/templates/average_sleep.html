@@ -15,13 +15,10 @@
     <!-- 日別表示 -->
     {% if period == 'daily' %}
         {% if sleep_times|length < 2 %}
-            <div class="alert alert-warning mt-3">最低でも2日記録が必要です</div>
+            <div class="alert alert-warning mt-3">最低でも2日の記録が必要です</div>
         {% else %}
-            <!-- 平均睡眠時間 -->
             <p>平均睡眠時間: {{ overall_avg.avg_hours }}時間{{ overall_avg.avg_minutes }}分</p>
             <p>評価: {{ overall_avg.evaluation }}</p>
-            
-            <!-- 日別睡眠記録テーブル -->
             <h3 class="mt-4">日別睡眠記録</h3>
             <table class="table">
                 <thead>
@@ -57,17 +54,14 @@
                 </tbody>
             </table>
         {% endif %}
-    
+
     <!-- 週別表示 -->
     {% elif period == 'weekly' %}
-        {% if weekly_avg|length < 2 %}
-            <div class="alert alert-warning mt-3">週をまたいで2日以上の記録が必要です</div>
+        {% if weekly_avg and weekly_avg|length < 2 %}
+            <div class="alert alert-warning mt-3">最低でも2日の記録が必要です</div>
         {% else %}
-            <!-- 平均睡眠時間 -->
             <p>平均睡眠時間: {{ overall_avg.avg_hours }}時間{{ overall_avg.avg_minutes }}分</p>
             <p>評価: {{ overall_avg.evaluation }}</p>
-            
-            <!-- 週別平均睡眠時間テーブル -->
             <h3 class="mt-4">週別平均睡眠時間</h3>
             <table class="table">
                 <thead>
@@ -105,17 +99,14 @@
                 </tbody>
             </table>
         {% endif %}
-    
+
     <!-- 月別表示 -->
     {% elif period == 'monthly' %}
-        {% if monthly_avg|length < 2 %}
-            <div class="alert alert-warning mt-3">月をまたいで2日以上の記録が必要です</div>
+        {% if monthly_avg and monthly_avg|length < 2 %}
+            <div class="alert alert-warning mt-3">最低でも2日の記録が必要です</div>
         {% else %}
-            <!-- 平均睡眠時間 -->
             <p>平均睡眠時間: {{ overall_avg.avg_hours }}時間{{ overall_avg.avg_minutes }}分</p>
             <p>評価: {{ overall_avg.evaluation }}</p>
-            
-            <!-- 月別平均睡眠時間テーブル -->
             <h3 class="mt-4">月別平均睡眠時間</h3>
             <table class="table">
                 <thead>
@@ -153,8 +144,8 @@
                 </tbody>
             </table>
         {% endif %}
-    
-    <!-- 全期間表示 -->
+
+    <!-- 全期間 -->
     {% elif period == 'all' %}
         <h3 class="mt-4">全期間平均睡眠時間</h3>
         <table class="table">
@@ -174,14 +165,13 @@
             </tbody>
         </table>
     {% endif %}
-    
+
     {% if not sleep_times %}
         <div class="alert alert-info mt-3">記録がありません。</div>
     {% endif %}
 </div>
 
 <script>
-// ドロップダウン変更時の処理
 function changePeriod(period) {
     window.location.href = "{{ url_for('average_sleep') }}?period=" + period;
 }
