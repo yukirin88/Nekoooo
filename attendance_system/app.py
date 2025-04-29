@@ -218,7 +218,7 @@ def calculate_weekly_average(sleep_times):
     """週ごとの平均睡眠時間を計算"""
     if not sleep_times:
         return []
-    
+
     # 週ごとにグループ化
     weeks = {}
     for item in sleep_times:
@@ -226,7 +226,7 @@ def calculate_weekly_average(sleep_times):
         if week_key not in weeks:
             weeks[week_key] = []
         weeks[week_key].append(item)
-    
+
     # 各週の平均を計算
     weekly_avgs = []
     for week_key, items in weeks.items():
@@ -234,11 +234,11 @@ def calculate_weekly_average(sleep_times):
         avg_sleep = total_sleep / len(items)
         avg_hours = int(avg_sleep)
         avg_minutes = int((avg_sleep - avg_hours) * 60)
-        
+
         year, week = week_key.split('-W')
         start_date = datetime.strptime(f'{year}-{week}-1', '%Y-%W-%w').date()
         end_date = start_date + timedelta(days=6)
-        
+
         weekly_avgs.append({
             'period': f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}",
             'avg_hours': avg_hours,
@@ -246,18 +246,18 @@ def calculate_weekly_average(sleep_times):
             'avg_duration': avg_sleep,
             'evaluation': evaluate_sleep(avg_sleep),
             'start_date': start_date,
-            'week_key': week_key
+            'week_key': week_key,
+            'record_days': len(items)  # ✅ 追加ポイント
         })
-    
-    # 日付の降順でソート
-    weekly_avgs.sort(key=lambda x: x['start_date'])
+
+    weekly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return weekly_avgs
 
 def calculate_monthly_average(sleep_times):
     """月ごとの平均睡眠時間を計算"""
     if not sleep_times:
         return []
-    
+
     # 月ごとにグループ化
     months = {}
     for item in sleep_times:
@@ -265,7 +265,7 @@ def calculate_monthly_average(sleep_times):
         if month_key not in months:
             months[month_key] = []
         months[month_key].append(item)
-    
+
     # 各月の平均を計算
     monthly_avgs = []
     for month_key, items in months.items():
@@ -273,22 +273,21 @@ def calculate_monthly_average(sleep_times):
         avg_sleep = total_sleep / len(items)
         avg_hours = int(avg_sleep)
         avg_minutes = int((avg_sleep - avg_hours) * 60)
-        
-        year, month = month_key.split('-')
-        month_date = datetime(int(year), int(month), 1).date()
-        
+
+        year, month = map(int, month_key.split('-'))
+        start_date = datetime(year, month, 1).date()
+
         monthly_avgs.append({
-            'period': month_date.strftime('%Y年%m月'),
+            'period': f"{year}年{month}月",
             'avg_hours': avg_hours,
             'avg_minutes': avg_minutes,
             'avg_duration': avg_sleep,
             'evaluation': evaluate_sleep(avg_sleep),
-            'month_date': month_date,
-            'month_key': month_key
+            'start_date': start_date,
+            'record_days': len(items)  # ✅ 追加
         })
-    
-    # 日付の降順でソート
-    monthly_avgs.sort(key=lambda x: x['month_date'])
+
+    monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return monthly_avgs
 
 def calculate_comparisons(sleep_times):
@@ -746,6 +745,7 @@ def calculate_weekly_average(sleep_times):
     if not sleep_times:
         return []
 
+    # 週ごとにグループ化
     weeks = {}
     for item in sleep_times:
         week_key = f"{item['year']}-W{item['week']:02d}"
@@ -753,6 +753,7 @@ def calculate_weekly_average(sleep_times):
             weeks[week_key] = []
         weeks[week_key].append(item)
 
+    # 各週の平均を計算
     weekly_avgs = []
     for week_key, items in weeks.items():
         total_sleep = sum(item['duration'] for item in items)
@@ -765,15 +766,15 @@ def calculate_weekly_average(sleep_times):
         end_date = start_date + timedelta(days=6)
 
         weekly_avgs.append({
-    'period': f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}",
-    'avg_hours': avg_hours,
-    'avg_minutes': avg_minutes,
-    'avg_duration': avg_sleep,
-    'evaluation': evaluate_sleep(avg_sleep),
-    'start_date': start_date,
-    'week_key': week_key,
-    'record_days': len(items)  # 記録日数
-})
+            'period': f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}",
+            'avg_hours': avg_hours,
+            'avg_minutes': avg_minutes,
+            'avg_duration': avg_sleep,
+            'evaluation': evaluate_sleep(avg_sleep),
+            'start_date': start_date,
+            'week_key': week_key,
+            'record_days': len(items)  # ✅ 追加ポイント
+        })
 
     weekly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return weekly_avgs
@@ -783,6 +784,7 @@ def calculate_monthly_average(sleep_times):
     if not sleep_times:
         return []
 
+    # 月ごとにグループ化
     months = {}
     for item in sleep_times:
         month_key = f"{item['year']}-{item['month']:02d}"
@@ -790,27 +792,28 @@ def calculate_monthly_average(sleep_times):
             months[month_key] = []
         months[month_key].append(item)
 
+    # 各月の平均を計算
     monthly_avgs = []
     for month_key, items in months.items():
         total_sleep = sum(item['duration'] for item in items)
         avg_sleep = total_sleep / len(items)
         avg_hours = int(avg_sleep)
         avg_minutes = int((avg_sleep - avg_hours) * 60)
-        year, month = month_key.split('-')
-        month_date = datetime(int(year), int(month), 1).date()
+
+        year, month = map(int, month_key.split('-'))
+        start_date = datetime(year, month, 1).date()
 
         monthly_avgs.append({
-            'period': month_date.strftime('%Y年%m月'),
+            'period': f"{year}年{month}月",
             'avg_hours': avg_hours,
             'avg_minutes': avg_minutes,
             'avg_duration': avg_sleep,
             'evaluation': evaluate_sleep(avg_sleep),
-            'month_date': month_date,
-            'month_key': month_key,
-            'record_days': len(items)  # 記録日数
+            'start_date': start_date,
+            'record_days': len(items)  # ✅ 追加
         })
 
-    monthly_avgs.sort(key=lambda x: x['month_date'], reverse=True)
+    monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return monthly_avgs
 
 def calculate_comparisons(sleep_times):
