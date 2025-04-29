@@ -11,20 +11,24 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write  # ✅ GITHUB_TOKEN が push 権限を持てるように
+      contents: write  # ✅ GITHUB_TOKEN が push できるようにする
 
     steps:
+<<<<<<< HEAD
 
       - name: Git config
+=======
+      - name: Set git config
+>>>>>>> c38794b (Fix: set token for authenticated push)
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'actions@github.com'
 
-      - name: Checkout main
+      - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # ✅ 全履歴取得（ブランチ作成に必要）
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}  # ✅ トークンを明示的に渡す
 
       - name: Generate backup file name
         run: echo "BACKUP_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
@@ -32,7 +36,7 @@ jobs:
       - name: Copy DB
         run: cp attendance.db ${{ env.BACKUP_NAME }}
 
-      - name: Commit and push to db-backup
+      - name: Commit and Push to db-backup branch
         run: |
           git switch -c db-backup || git switch db-backup
           git add ${{ env.BACKUP_NAME }}
