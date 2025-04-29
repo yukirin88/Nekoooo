@@ -1,0 +1,13 @@
+# SQLite DB
+attendance.db
+
+# PyCache
+__pycache__/
+*.pyc
+
+# Render instance data
+instance/
+
+# SSL証明書（念のため）
+*.pem
+*.cnf

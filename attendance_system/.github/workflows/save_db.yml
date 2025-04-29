@@ -1,0 +1,25 @@
+name: Backup SQLite DB
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 毎日0時に実行
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download current DB from Render
+        run: curl -o attendance.db https://yukirin-github-io-nekooo.onrender.com/attendance.db
+
+      - name: Commit DB to backup branch
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git init
+          git remote add origin https://github.com/yukirin88/Nekoooo.git
+          git fetch
+          git checkout -B db-backup
+          git add attendance.db
+          git commit -m "Auto backup $(date)"
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force

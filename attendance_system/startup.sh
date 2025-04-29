@@ -1,8 +1,9 @@
 #!/bin/bash
-# GitHub からバックアップDBをダウンロード
+
+# DBをGitHubから取得
 curl -H "Authorization: token $GITHUB_TOKEN" \
      -o attendance.db \
-     https://raw.githubusercontent.com/あなたのユーザー名/リポジトリ名/db-backup/attendance.db
+     https://raw.githubusercontent.com/yukirin88/Nekoooo/db-backup/attendance.db
 
-# Flask アプリを起動
+# Flask アプリ起動
 gunicorn app:app

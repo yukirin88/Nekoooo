@@ -1452,6 +1452,12 @@ def get_sleep_times(conn, user_id):
     
     return sleep_times
 
+from flask import send_file
+
+@app.route('/download_db')
+def download_db():
+    return send_file(DATABASE_PATH, as_attachment=True)
+
 # その他のルートと関数は変更なし（適切なwith文を使用してデータベース接続を管理）
 
 if __name__ == '__main__':
