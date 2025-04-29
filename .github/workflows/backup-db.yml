@@ -2,33 +2,37 @@ name: Auto Backup SQLite DB
 
 on:
   schedule:
-    - cron: "0 0 * * *"  # 毎日0:00 UTC（日本時間 9:00）
+    - cron: "0 0 * * *"  # 毎日 0:00 UTC（日本時間 9:00）
   workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # ✅ GITHUB_TOKEN が push 権限を持てるように
+
     steps:
-      - name: Set git config
+      - name: Git config
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'actions@github.com'
 
-      - name: Checkout repository
+      - name: Checkout main
         uses: actions/checkout@v3
         with:
+          fetch-depth: 0  # ✅ 全履歴取得（ブランチ作成に必要）
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create backup filename
-        id: vars
+      - name: Generate backup file name
         run: echo "BACKUP_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
 
-      - name: Copy DB with date
+      - name: Copy DB
         run: cp attendance.db ${{ env.BACKUP_NAME }}
 
-      - name: Commit and push
+      - name: Commit and push to db-backup
         run: |
-          git checkout -B db-backup
+          git switch -c db-backup || git switch db-backup
           git add ${{ env.BACKUP_NAME }}
-          git commit -m "Auto backup $(date -u)"
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} db-backup --force
+          git commit -m "Auto backup $(date -u)" || echo "No changes to commit"
+          git push origin db-backup
