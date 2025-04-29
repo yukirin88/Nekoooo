@@ -19,7 +19,7 @@
             睡眠記録がありません。最初の記録を追加してください。
         </div>
     {% else %}
-        <!-- 全期間の平均睡眠時間表示（全体平均のラベル統一＆小さめ） -->
+        <!-- 全期間の平均睡眠時間表示 -->
         <div class="overall-average-box text-center mx-auto mb-4">
             <strong>全期間の平均睡眠時間</strong><br>
             {% if overall_avg.avg_hours or overall_avg.avg_minutes %}
@@ -59,13 +59,13 @@
                                         <td>{{ item.date.strftime('%Y/%m/%d') }}</td>
                                         <td>{{ item.hours }}時間{{ item.minutes }}分</td>
                                         <td>
-                                            {% if loop.index0 < sleep_times|length - 1 %}
-                                                {% set next = sleep_times[loop.index0 + 1] %}
-                                                {% set diff = item.duration - next.duration %}
-                                                <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
-                                                    {{ "%+.1f"|format(diff) }}時間
+                                            {% if item.diff_str is defined %}
+                                                <span class="{% if item.diff_is_increase %}text-success{% else %}text-danger{% endif %}">
+                                                    {{ item.diff_str }}
                                                 </span>
-                                            {% else %} - {% endif %}
+                                            {% else %}
+                                                -
+                                            {% endif %}
                                         </td>
                                         <td>{{ evaluate_sleep(item.duration) }}</td>
                                     </tr>
@@ -102,13 +102,13 @@
                                     <td>{{ week.avg_hours }}時間{{ week.avg_minutes }}分</td>
                                     <td>{{ week.record_days }}日</td>
                                     <td>
-                                        {% if loop.index0 < weekly_avg|length - 1 %}
-                                            {% set next = weekly_avg[loop.index0 + 1] %}
-                                            {% set diff = week.avg_duration - next.avg_duration %}
-                                            <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
-                                                {{ "%+.1f"|format(diff) }}時間
+                                        {% if week.diff_str is defined %}
+                                            <span class="{% if week.diff_is_increase %}text-success{% else %}text-danger{% endif %}">
+                                                {{ week.diff_str }}
                                             </span>
-                                        {% else %} - {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
                                     </td>
                                     <td>{{ week.evaluation }}</td>
                                 </tr>
@@ -144,13 +144,13 @@
                                     <td>{{ month.avg_hours }}時間{{ month.avg_minutes }}分</td>
                                     <td>{{ month.record_days }}日</td>
                                     <td>
-                                        {% if loop.index0 < monthly_avg|length - 1 %}
-                                            {% set next = monthly_avg[loop.index0 + 1] %}
-                                            {% set diff = month.avg_duration - next.avg_duration %}
-                                            <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
-                                                {{ "%+.1f"|format(diff) }}時間
+                                        {% if month.diff_str is defined %}
+                                            <span class="{% if month.diff_is_increase %}text-success{% else %}text-danger{% endif %}">
+                                                {{ month.diff_str }}
                                             </span>
-                                        {% else %} - {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
                                     </td>
                                     <td>{{ month.evaluation }}</td>
                                 </tr>
@@ -163,7 +163,6 @@
 
         <!-- 全期間表示 -->
         {% elif period == 'all' %}
-            <!-- すでに上部で全期間の平均睡眠時間を表示しているので、ここは省略または補足説明のみでOK -->
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
                 全期間の平均睡眠時間を上部に表示しています。

@@ -394,35 +394,57 @@ def calculate_monthly_average(sleep_times):
     monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
     return monthly_avgs
 
+def format_hour_minute(hours_float):
+    """小数点の時間を「〇〇時間〇〇分」形式に変換"""
+    sign = "-" if hours_float < 0 else ""
+    hours_abs = abs(hours_float)
+    h = int(hours_abs)
+    m = int(round((hours_abs - h) * 60))
+    if m == 60:
+        h += 1
+        m = 0
+    return f"{sign}{h}時間{m:02d}分"
+
+def calculate_diff(sorted_times, current_idx, compare_idx):
+    """2つの睡眠時間の差分を計算"""
+    if not sorted_times or compare_idx is None or current_idx >= len(sorted_times) or compare_idx >= len(sorted_times):
+        return {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
+    current = sorted_times[current_idx]['duration']
+    compare = sorted_times[compare_idx]['duration']
+    diff = current - compare
+    is_increase = diff > 0
+    diff_abs = abs(diff)
+    diff_hours = int(diff_abs)
+    diff_minutes = int((diff_abs - diff_hours) * 60)
+    if diff_minutes == 60:
+        diff_hours += 1
+        diff_minutes = 0
+    diff_str = format_hour_minute(diff)
+    return {
+        'diff_hours': diff_hours,
+        'diff_minutes': diff_minutes,
+        'is_increase': is_increase,
+        'diff_str': diff_str
+    }
+
 def calculate_comparisons(sleep_times):
     """前日比、先週比、先月比を計算"""
     if not sleep_times:
         return {
-            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
+            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"},
+            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"},
+            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
         }
-    
-    # 日付でソート
     sorted_times = sorted(sleep_times, key=lambda x: x['date'], reverse=True)
-    
-    # 現在の日付を取得（sorted_times[0]['date']がすでにdatetime.dateオブジェクト）
     today = sorted_times[0]['date']
-    
-    # 前日比
     yesterday_diff = calculate_diff(sorted_times, 0, 1)
-    
-    # 先週比（同じ曜日）
     last_week_idx = next((i for i, item in enumerate(sorted_times) if (today - item['date']).days >= 7 and today.weekday() == item['date'].weekday()), None)
-    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    # 先月比（同じ日）
+    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx is not None else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
     last_month_day = today.day
     last_month = today.month - 1 if today.month > 1 else 12
     last_month_year = today.year if today.month > 1 else today.year - 1
     last_month_idx = next((i for i, item in enumerate(sorted_times) if item['date'].year == last_month_year and item['date'].month == last_month and item['date'].day == last_month_day), None)
-    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
+    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx is not None else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False, 'diff_str': "0時間00分"}
     return {
         'yesterday': yesterday_diff,
         'last_week': last_week_diff,
