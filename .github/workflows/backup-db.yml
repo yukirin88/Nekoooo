@@ -1,13 +1,23 @@
+<<<<<<< HEAD
 name: Manual Backup DB
 
 on:
   workflow_dispatch:
+=======
+name: Daily SQLite DB Backup
+
+on:
+  schedule:
+    # Runs every day at 0:00 JST (15:00 UTC)
+    - cron: '0 15 * * *'
+  workflow_dispatch:  # Allow manual trigger
+>>>>>>> 9145897 (Fix: use GITHUB_TOKEN for backup push)
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-
     steps:
+<<<<<<< HEAD
     
       - name: ⬇️ Checkout code
         uses: actions/checkout@v3
@@ -29,3 +39,34 @@ jobs:
           git add "attendance_${{ env.DATE }}.db"
           git commit -m "Auto backup ${{ env.DATE }}"
           git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
+=======
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # fetch all history for branches
+
+      - name: Set current date (UTC)
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Copy SQLite DB with date suffix
+        run: |
+          cp attendance.db attendance_${{ env.DATE }}.db
+
+      - name: Switch to db-backup branch
+        run: |
+          git fetch origin db-backup || true
+          git checkout db-backup || git checkout -b db-backup
+
+      - name: Commit backup
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add attendance_${{ env.DATE }}.db
+          git commit -m "chore(db): backup attendance_${{ env.DATE }}.db" || echo "No changes to commit"
+
+      - name: Push to db-backup
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: db-backup
+>>>>>>> 9145897 (Fix: use GITHUB_TOKEN for backup push)
