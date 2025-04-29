@@ -1,14 +1,20 @@
-# SQLite DB（GitHub管理に任せる）
+# 明示的に追跡から外す
+attendance.db
+
+# SQLite（.db）ファイル全般を無視
 *.db
+
+# ただし、日付付きバックアップファイルは除外して追跡させる
+!attendance_*.db
 
 # Pythonキャッシュ
 __pycache__/
 *.pyc
 
-# Flask インスタンス構成（環境ごとに異なる）
+# Flask インスタンス構成
 instance/
 
-# 環境変数ファイル（Render側で管理）
+# 環境変数ファイル
 .env
 
 # SSL証明書（念のため）
