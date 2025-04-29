@@ -3,7 +3,7 @@ name: Auto DB Backup
 on:
   schedule:
     - cron: '0 0 * * *'  # 毎日0時UTC（日本時間9時）
-  workflow_dispatch:  # 手動実行にも対応
+  workflow_dispatch:  # 手動でも実行可
 
 jobs:
   backup:
