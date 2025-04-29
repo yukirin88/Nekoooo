@@ -1,4 +1,4 @@
-name: Manual DB Backup
+name: Manual Backup DB
 
 on:
   workflow_dispatch:
@@ -6,23 +6,25 @@ on:
 jobs:
   backup:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: ⬇️ Checkout code
         uses: actions/checkout@v3
 
-      - name: Set current date as env var
-        run: echo "DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+      - name: 🕓 Set current date
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Create backup file
-        run: cp attendance.db "attendance_${{ env.DATE }}.db"
+      - name: 💾 Create backup file
+        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
 
-      - name: Commit and push backup
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🧪 Debug backup file list
+        run: ls -l *.db
+
+      - name: 🚀 Push to db-backup branch using PAT
         run: |
-          git config --global user.email "github-actions@github.com"
+          git config --global user.email "github-actions@example.com"
           git config --global user.name "github-actions"
           git checkout -B db-backup
           git add "attendance_${{ env.DATE }}.db"
           git commit -m "Auto backup ${{ env.DATE }}"
-          git push "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" db-backup
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup

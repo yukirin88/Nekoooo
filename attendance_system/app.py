@@ -25,6 +25,10 @@ from psycopg2.extras import DictCursor
 # 環境変数からデータベースURLを取得
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+# DATABASE_URL = os.environ.get('DATABASE_URL')  ← 一時的にコメントアウト
+DATABASE_URL = None  # ← SQLite を使わせる
+
+
 # アプリケーションの初期化
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
@@ -215,9 +219,9 @@ def calculate_average(sleep_times):
     }
 
 def calculate_weekly_average(sleep_times):
-    """週ごとの平均睡眠時間を計算"""
     if not sleep_times:
-        return []
+        return []  # ← ここが大事！
+    # 以下略...
 
     # 週ごとにグループ化
     weeks = {}
@@ -254,9 +258,9 @@ def calculate_weekly_average(sleep_times):
     return weekly_avgs
 
 def calculate_monthly_average(sleep_times):
-    """月ごとの平均睡眠時間を計算"""
     if not sleep_times:
-        return []
+        return []  # ← 同様にここも！
+    # 以下略...
 
     # 月ごとにグループ化
     months = {}
@@ -399,8 +403,6 @@ def index():
                            is_private=session.get('is_private', False),
                            page=page,
                            total_pages=total_pages)
-
-
 
 @app.route('/like_record/<int:record_id>', methods=['POST'])
 @login_required
@@ -706,9 +708,7 @@ def average_sleep():
                 evaluate_sleep=evaluate_sleep,
                 round_decimal=round_decimal  # round_decimal関数を渡す
             )
-
-    except Exception as e:
-        app.logger.error(f"エラーが発生しました: {str(e)}")
+        
         return render_template(
             'average_sleep.html',
             sleep_times=[],
@@ -721,6 +721,11 @@ def average_sleep():
             evaluate_sleep=evaluate_sleep,
             round_decimal=round_decimal  # round_decimal関数を渡す
         )
+    except Exception as e:
+        app.logger.error(f"エラーが発生しました: {str(e)}")
+        flash("データの取得に失敗しました。再度お試しください。", "danger")
+        return redirect(url_for('index'))
+    
     
 def calculate_overall_average(sleep_times):
     """全ての記録の平均睡眠時間を計算"""
@@ -741,9 +746,9 @@ def calculate_overall_average(sleep_times):
     }
 
 def calculate_weekly_average(sleep_times):
-    """週ごとの平均睡眠時間を計算"""
     if not sleep_times:
-        return []
+        return []  # ← ここが大事！
+    # 以下略...
 
     # 週ごとにグループ化
     weeks = {}
@@ -780,9 +785,9 @@ def calculate_weekly_average(sleep_times):
     return weekly_avgs
 
 def calculate_monthly_average(sleep_times):
-    """月ごとの平均睡眠時間を計算"""
     if not sleep_times:
-        return []
+        return []  # ← 同様にここも！
+    # 以下略...
 
     # 月ごとにグループ化
     months = {}
@@ -1010,32 +1015,29 @@ def day_records(date):  # パラメータを受け取る
 @app.route('/all_records')
 @login_required
 def all_records():
-    # get_records_from_database()の呼び出しを削除
-    # records = get_records_from_database()  # この行を削除または以下のようにコメントアウト
-    
     page = request.args.get("page", 1, type=int)
     per_page = 20
     offset = (page - 1) * per_page
     user_filter = request.args.get("user_id", "all")
-    
+
     with get_db_connection() as conn:
-        # ユーザーリストを取得（管理者以外、プライベートユーザーは除外）
+        # ユーザーリストを取得（adminや非公開ユーザーは除外）
         users = conn.execute(
             "SELECT id, username FROM users WHERE is_admin = 0 AND is_private = 0 ORDER BY username"
         ).fetchall()
-        
-        # クエリ条件を構築
-        query_conditions = "records.is_deleted=0 AND users.is_private=0"  # プライベートユーザーの記録を除外
+
+        # クエリ条件を構築（adminユーザーも除外）
+        query_conditions = "records.is_deleted=0 AND users.is_private=0 AND users.username != 'admin'"
         query_params = []
-        
+
         if user_filter != "all" and user_filter.isdigit():
             query_conditions += " AND records.user_id=?"
             query_params.append(int(user_filter))
-        
+
         # 総レコード数を取得
         count_query = f"SELECT COUNT(*) FROM records JOIN users ON records.user_id=users.id WHERE {query_conditions}"
         total_records = conn.execute(count_query, query_params).fetchone()[0]
-        
+
         # レコードを取得
         records_query = f"""
             SELECT users.username, users.id as user_id, records.id, records.action,
@@ -1045,15 +1047,15 @@ def all_records():
             FROM records JOIN users ON records.user_id=users.id
             WHERE {query_conditions}
             ORDER BY records.timestamp DESC LIMIT ? OFFSET ?"""
-        
+
         records = conn.execute(records_query, query_params + [per_page, offset]).fetchall()
-        
+
         # いいね情報を取得
         liked_ids = [row["record_id"] for row in conn.execute(
             "SELECT record_id FROM likes WHERE user_id=?",
             (session["user_id"],)
         ).fetchall()]
-        
+
         formatted_records = []
         for record in records:
             formatted_records.append({
@@ -1067,9 +1069,9 @@ def all_records():
                 "id": record["id"],
                 "liked": record["id"] in liked_ids
             })
-        
+
         total_pages = (total_records + per_page - 1) // per_page
-        
+
         return render_template("all_records.html",
                               records=formatted_records,
                               users=users,
