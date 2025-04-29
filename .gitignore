@@ -1,12 +1,15 @@
-# SQLite DB
-attendance.db
+# SQLite DB（GitHub管理に任せる）
+*.db
 
-# PyCache
+# Pythonキャッシュ
 __pycache__/
 *.pyc
 
-# Render instance data
+# Flask インスタンス構成（環境ごとに異なる）
 instance/
+
+# 環境変数ファイル（Render側で管理）
+.env
 
 # SSL証明書（念のため）
 *.pem
