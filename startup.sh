@@ -1,17 +1,25 @@
-- name: Get date-based filename
-  run: echo "DB_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
+#!/bin/bash
 
-- name: Download DB from Render
-  run: curl -o $DB_NAME https://yukirin-github-io-nekooo.onrender.com/attendance.db
+# 今日と昨日の日付取得
+TODAY=$(date +'%Y-%m-%d')
+YESTERDAY=$(date -d "yesterday" +'%Y-%m-%d')
+TOKEN=$GITHUB_TOKEN
 
-- name: Commit to db-backup branch
-  run: |
-    git config --global user.name 'github-actions'
-    git config --global user.email 'github-actions@github.com'
-    git init
-    git remote add origin https://github.com/yukirin88/Nekoooo.git
-    git fetch
-    git checkout -B db-backup
-    git add $DB_NAME
-    git commit -m "Backup on $(date)"
-    git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
+# 今日のDBを試す
+echo "🔍 Trying today's DB: attendance_$TODAY.db"
+curl -H "Authorization: token $TOKEN" \
+     -f -o attendance.db \
+     https://raw.githubusercontent.com/yukirin88/Nekoooo/db-backup/attendance_$TODAY.db || {
+
+  # 昨日のDBを試す
+  echo "❗ Not found. Trying yesterday's DB: attendance_$YESTERDAY.db"
+  curl -H "Authorization: token $TOKEN" \
+       -f -o attendance.db \
+       https://raw.githubusercontent.com/yukirin88/Nekoooo/db-backup/attendance_$YESTERDAY.db || {
+
+    echo "⚠️ DB not found. Starting fresh."
+  }
+}
+
+# アプリ起動
+gunicorn attendance_system.app:app
