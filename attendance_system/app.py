@@ -22,6 +22,34 @@ import os
 import psycopg2
 from psycopg2.extras import DictCursor
 
+import shutil
+import tempfile
+import subprocess
+
+def backup_db_to_github():
+    import os
+    from datetime import datetime
+    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
+    backup_filename = f"attendance_{today}.db"
+    backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
+    shutil.copyfile(DATABASE_PATH, backup_path)
+
+    repo_url = "https://github.com/yukirin88/Nekoooo.git"
+    branch = "db-backup"
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
+    if not token:
+        print("GitHubトークンが設定されていません")
+        return
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        subprocess.run(["git", "clone", "--branch", branch, f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir], check=True)
+        dst = os.path.join(tmpdir, backup_filename)
+        shutil.copyfile(backup_path, dst)
+        subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
+        subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
+        subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
+    print("バックアップをGitHubにpushしました")
+
 # 環境変数からデータベースURLを取得
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
@@ -582,17 +610,14 @@ def logout():
 def record():
     action = request.form.get('action')
     memo = request.form.get('memo', '')
-    
+
     if not action or action not in ['wake_up', 'sleep']:
         flash('有効な行動を選択してください', 'danger')
         return redirect(url_for('index'))
 
     try:
-        # 日本時間のタイムスタンプを明示的に生成
         timestamp = datetime.now(pytz.timezone('Asia/Tokyo'))
-        
         with get_db_connection() as conn:
-            # 同じ日に同じアクションの記録があるかチェック
             existing_record = conn.execute('''
                 SELECT * FROM records
                 WHERE user_id = ? AND action = ? AND DATE(timestamp, '+9 hours') = DATE(?, '+9 hours')
@@ -604,16 +629,18 @@ def record():
                 return redirect(url_for('index'))
 
             conn.execute('BEGIN TRANSACTION')
-            # レコード挿入
             conn.execute(
                 '''INSERT INTO records
                 (user_id, action, timestamp, memo)
                 VALUES (?, ?, ?, ?)''',
                 (session['user_id'], action, timestamp.isoformat(), memo)
             )
-            # トランザクションコミット
             conn.commit()
             flash('記録が正常に保存されました', 'success')
+
+            # ★ここでバックアップ関数を呼ぶ
+            backup_db_to_github()
+
     except sqlite3.Error as e:
         conn.rollback()
         error_message = f'データベースエラー: {str(e)}'
