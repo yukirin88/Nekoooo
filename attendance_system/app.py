@@ -630,9 +630,7 @@ def record():
 @login_required
 def average_sleep():
     try:
-        # デフォルト値を「日別」に設定
         period = request.args.get('period', 'daily')
-
         with get_db_connection() as conn:
             data = conn.execute('''
                 SELECT date(timestamp, '+9 hours') as date,
@@ -640,60 +638,53 @@ def average_sleep():
                        timestamp
                 FROM records
                 WHERE user_id = ? AND is_deleted = 0
-                      AND (action = 'sleep' OR action = 'wake_up')
+                  AND (action = 'sleep' OR action = 'wake_up')
                 ORDER BY timestamp
             ''', (session['user_id'],)).fetchall()
 
             if not data:
+                # 0件でもエラーにせず、空リスト・デフォルト値で描画
                 return render_template(
                     'average_sleep.html',
                     sleep_times=[],
-                    daily_avg=None,
-                    weekly_avg=None,
-                    monthly_avg=None,
-                    overall_avg=None,
+                    daily_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
+                    weekly_avg=[],
+                    monthly_avg=[],
+                    overall_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
                     comparisons=None,
                     period=period,
                     evaluate_sleep=evaluate_sleep,
-                    round_decimal=round_decimal  # round_decimal関数を渡す
+                    round_decimal=round_decimal
                 )
 
             # 睡眠時間を計算
             sleep_times = []
             sleep_start = None
-
             for row in data:
                 if row['action'] == 'sleep':
                     sleep_start = datetime.fromisoformat(row['timestamp'])
                 elif row['action'] == 'wake_up' and sleep_start:
                     wake_time = datetime.fromisoformat(row['timestamp'])
-                    sleep_duration = (wake_time - sleep_start).total_seconds() / 3600  # 時間単位
-
-                    # 時間と分に分割
+                    sleep_duration = (wake_time - sleep_start).total_seconds() / 3600
                     sleep_hours = int(sleep_duration)
                     sleep_minutes = int((sleep_duration - sleep_hours) * 60)
-
                     sleep_date = datetime.fromisoformat(row['timestamp']).date()
                     sleep_times.append({
                         'date': sleep_date,
                         'duration': sleep_duration,
                         'hours': sleep_hours,
                         'minutes': sleep_minutes,
-                        'week': sleep_date.isocalendar()[1],  # ISO週番号
+                        'week': sleep_date.isocalendar()[1],
                         'month': sleep_date.month,
                         'year': sleep_date.year
                     })
-
                     sleep_start = None
 
-            # 各種平均値と比較値を計算
             daily_avg = calculate_average(sleep_times)
             overall_avg = calculate_overall_average(sleep_times)
             weekly_avg = calculate_weekly_average(sleep_times)
             monthly_avg = calculate_monthly_average(sleep_times)
             comparisons = calculate_comparisons(sleep_times)
-
-            # 降順にソート
             sleep_times.sort(key=lambda x: x['date'], reverse=True)
 
             return render_template(
@@ -706,38 +697,37 @@ def average_sleep():
                 sleep_times=sleep_times,
                 period=period,
                 evaluate_sleep=evaluate_sleep,
-                round_decimal=round_decimal  # round_decimal関数を渡す
+                round_decimal=round_decimal
             )
-        
-        return render_template(
-            'average_sleep.html',
-            sleep_times=[],
-            daily_avg=None,
-            weekly_avg=None,
-            monthly_avg=None,
-            overall_avg=None,
-            comparisons=None,
-            period=period,
-            evaluate_sleep=evaluate_sleep,
-            round_decimal=round_decimal  # round_decimal関数を渡す
-        )
     except Exception as e:
         app.logger.error(f"エラーが発生しました: {str(e)}")
         flash("データの取得に失敗しました。再度お試しください。", "danger")
         return redirect(url_for('index'))
-    
-    
-def calculate_overall_average(sleep_times):
-    """全ての記録の平均睡眠時間を計算"""
+
+
+def calculate_average(sleep_times):
     if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "データなし"}
-    
+        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
     total_sleep = sum(item['duration'] for item in sleep_times)
     avg_sleep = total_sleep / len(sleep_times)
     avg_hours = int(avg_sleep)
     avg_minutes = int((avg_sleep - avg_hours) * 60)
-    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "評価不可"
-    
+    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
+    return {
+        'avg_hours': avg_hours,
+        'avg_minutes': avg_minutes,
+        'avg_duration': avg_sleep,
+        'evaluation': evaluation
+    }
+
+def calculate_overall_average(sleep_times):
+    if not sleep_times:
+        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
+    total_sleep = sum(item['duration'] for item in sleep_times)
+    avg_sleep = total_sleep / len(sleep_times)
+    avg_hours = int(avg_sleep)
+    avg_minutes = int((avg_sleep - avg_hours) * 60)
+    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
     return {
         'avg_hours': avg_hours,
         'avg_minutes': avg_minutes,
@@ -822,7 +812,6 @@ def calculate_monthly_average(sleep_times):
     return monthly_avgs
 
 def calculate_comparisons(sleep_times):
-    """前日比、先週比、先月比を計算"""
     if not sleep_times:
         return {
             'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
