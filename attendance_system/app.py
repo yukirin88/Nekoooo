@@ -27,11 +27,11 @@ import tempfile
 import subprocess
 
 def backup_db_to_github():
-    import os
-    from datetime import datetime
+    # 今日の日付でバックアップファイル名を作成
     today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
     backup_filename = f"attendance_{today}.db"
     backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
+    # attendance.dbをコピーしてバックアップファイル作成
     shutil.copyfile(DATABASE_PATH, backup_path)
 
     repo_url = "https://github.com/yukirin88/Nekoooo.git"
@@ -42,7 +42,10 @@ def backup_db_to_github():
         return
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        subprocess.run(["git", "clone", "--branch", branch, f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir], check=True)
+        subprocess.run([
+            "git", "clone", "--branch", branch,
+            f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir
+        ], check=True)
         dst = os.path.join(tmpdir, backup_filename)
         shutil.copyfile(backup_path, dst)
         subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
@@ -618,21 +621,26 @@ def record():
     try:
         timestamp = datetime.now(pytz.timezone('Asia/Tokyo'))
         with get_db_connection() as conn:
-            # ここを修正
+            # 既存レコード数をカウント
             count_query = '''
                 SELECT COUNT(*) FROM records
                 WHERE user_id = ? AND action = ? AND DATE(timestamp, '+9 hours') = DATE(?, '+9 hours')
                 AND is_deleted = 0
             '''
-            existing_count = conn.execute(count_query, (session['user_id'], action, timestamp.isoformat())).fetchone()[0]
+            existing_count = conn.execute(
+                count_query,
+                (session['user_id'], action, timestamp.isoformat())
+            ).fetchone()[0]
 
+            # 制限判定
             if action == 'sleep' and existing_count >= 2:
-                flash('本日の就寝の記録回数上限に達しています。', 'warning')
+                flash('本日は2回までしか就寝記録できません。', 'warning')
                 return redirect(url_for('index'))
             elif action == 'wake_up' and existing_count >= 1:
-                flash('本日はもう起きているはずです。', 'warning')
+                flash('本日は1回までしか起床記録できません。', 'warning')
                 return redirect(url_for('index'))
 
+            # 記録を追加
             conn.execute('BEGIN TRANSACTION')
             conn.execute(
                 '''INSERT INTO records
@@ -642,7 +650,12 @@ def record():
             )
             conn.commit()
             flash('記録が正常に保存されました', 'success')
-            backup_db_to_github()
+
+            # 記録ごとにバックアップ
+            try:
+                backup_db_to_github()
+            except Exception as e:
+                app.logger.error(f"バックアップに失敗しました: {e}")
 
     except sqlite3.Error as e:
         conn.rollback()
