@@ -618,14 +618,19 @@ def record():
     try:
         timestamp = datetime.now(pytz.timezone('Asia/Tokyo'))
         with get_db_connection() as conn:
-            existing_record = conn.execute('''
-                SELECT * FROM records
+            # ここを修正
+            count_query = '''
+                SELECT COUNT(*) FROM records
                 WHERE user_id = ? AND action = ? AND DATE(timestamp, '+9 hours') = DATE(?, '+9 hours')
                 AND is_deleted = 0
-            ''', (session['user_id'], action, timestamp.isoformat())).fetchone()
+            '''
+            existing_count = conn.execute(count_query, (session['user_id'], action, timestamp.isoformat())).fetchone()[0]
 
-            if existing_record:
-                flash('既に本日分は登録されています', 'warning')
+            if action == 'sleep' and existing_count >= 2:
+                flash('本日の就寝の記録回数上限に達しています。', 'warning')
+                return redirect(url_for('index'))
+            elif action == 'wake_up' and existing_count >= 1:
+                flash('本日はもう起きているはずです。', 'warning')
                 return redirect(url_for('index'))
 
             conn.execute('BEGIN TRANSACTION')
@@ -637,8 +642,6 @@ def record():
             )
             conn.commit()
             flash('記録が正常に保存されました', 'success')
-
-            # ★ここでバックアップ関数を呼ぶ
             backup_db_to_github()
 
     except sqlite3.Error as e:
