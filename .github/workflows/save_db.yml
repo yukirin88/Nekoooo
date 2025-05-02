@@ -1,10 +1,9 @@
 name: Daily Backup DB
 
 on:
-  # 毎日0時(JST)に実行
   schedule:
-    - cron: '0 15 * * *' # 毎日0時 (JST) に実行
-  workflow_dispatch: # 手動実行も可能
+    - cron: '0 15 * * *' # 毎日0時(JST)
+  workflow_dispatch:
 
 jobs:
   backup:
@@ -12,6 +11,8 @@ jobs:
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: db-backup # 明示的にdb-backupブランチを指定
 
       - name: 🕓 Set current date
         run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
@@ -19,14 +20,12 @@ jobs:
       - name: 💾 Create backup file
         run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
 
-      - name: 🧪 Debug backup file list
-        run: ls -l *.db
-
-      - name: 🚀 Push to db-backup branch using PAT
+      - name: 🚀 Push to db-backup branch
         run: |
           git config --global user.email "github-actions@example.com"
           git config --global user.name "github-actions"
-          git checkout -B db-backup
+          git fetch origin db-backup          # リモートの変更を取得
+          git checkout -B db-backup origin/db-backup # リモートブランチを強制リセット
           git add "attendance_${{ env.DATE }}.db"
           git commit -m "Auto backup ${{ env.DATE }}"
-          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force
