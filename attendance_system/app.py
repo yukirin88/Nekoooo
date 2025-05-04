@@ -1,13 +1,9 @@
-# app.pyの先頭に追加
 from decimal import Decimal, ROUND_HALF_UP
-
-def round_decimal(value, precision=0):
-    """Decimalクラスを使用して正確な四捨五入を行う"""
-    quantize_value = Decimal(f"1.{'0' * precision}")
-    return Decimal(str(value)).quantize(quantize_value, rounding=ROUND_HALF_UP)
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import shutil
+import tempfile
+import subprocess
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_bootstrap import Bootstrap
 from flask import jsonify
@@ -18,20 +14,20 @@ import sqlite3
 import hashlib
 import calendar
 import pytz
-import os
 import psycopg2
 from psycopg2.extras import DictCursor
 
-import shutil
-import tempfile
-import subprocess
+# セッション設定・DBパスなどの定義をimport群の直後に
+DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = None  # ← SQLite を使わせる
+RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
+DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
 def backup_db_to_github():
-    # 今日の日付でバックアップファイル名を作成
+    """記録ごとにGitHubのdb-backupブランチへバックアップpush"""
     today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
     backup_filename = f"attendance_{today}.db"
     backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
-    # attendance.dbをコピーしてバックアップファイル作成
     shutil.copyfile(DATABASE_PATH, backup_path)
 
     repo_url = "https://github.com/yukirin88/Nekoooo.git"
@@ -53,23 +49,11 @@ def backup_db_to_github():
         subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
     print("バックアップをGitHubにpushしました")
 
-# 環境変数からデータベースURLを取得
-DATABASE_URL = os.environ.get('DATABASE_URL')
-
-# DATABASE_URL = os.environ.get('DATABASE_URL')  ← 一時的にコメントアウト
-DATABASE_URL = None  # ← SQLite を使わせる
-
-
-# アプリケーションの初期化
+# Flaskアプリの初期化
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
 CORS(app)
-
-# セッション設定
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
-DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
-
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
