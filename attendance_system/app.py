@@ -669,10 +669,11 @@ def average_sleep():
                 ORDER BY timestamp
             ''', (session['user_id'],)).fetchall()
 
+            # 記録がない場合の処理（ここが重要）
             if not data:
-                # 0件でもエラーにせず、空リスト・デフォルト値で描画
                 return render_template(
                     'average_sleep.html',
+                    has_records=False,  # 新しいフラグを追加
                     sleep_times=[],
                     daily_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
                     weekly_avg=[],
@@ -684,7 +685,7 @@ def average_sleep():
                     round_decimal=round_decimal
                 )
 
-            # 睡眠時間を計算
+            # --- 既存の睡眠時間計算処理（変更なし）---
             sleep_times = []
             sleep_start = None
             for row in data:
@@ -707,6 +708,7 @@ def average_sleep():
                     })
                     sleep_start = None
 
+            # --- 既存の平均計算処理（変更なし）---
             daily_avg = calculate_average(sleep_times)
             overall_avg = calculate_overall_average(sleep_times)
             weekly_avg = calculate_weekly_average(sleep_times)
@@ -716,6 +718,7 @@ def average_sleep():
 
             return render_template(
                 'average_sleep.html',
+                has_records=True,  # 新しいフラグを追加
                 daily_avg=daily_avg,
                 weekly_avg=weekly_avg,
                 monthly_avg=monthly_avg,
@@ -726,11 +729,11 @@ def average_sleep():
                 evaluate_sleep=evaluate_sleep,
                 round_decimal=round_decimal
             )
-    except Exception as e:
-        app.logger.error(f"エラーが発生しました: {str(e)}")
-        flash("データの取得に失敗しました。再度お試しください。", "danger")
-        return redirect(url_for('index'))
 
+    except Exception as e:
+        app.logger.error(f"平均睡眠時間計算エラー: {str(e)}")
+        flash('データの取得に失敗しました。再度お試しください。', 'danger')
+        return redirect(url_for('index'))
 
 def calculate_average(sleep_times):
     if not sleep_times:
