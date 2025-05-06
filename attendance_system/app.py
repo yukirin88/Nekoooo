@@ -24,7 +24,11 @@ RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.absp
 DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
 def backup_db_to_github():
-    """記録ごとにGitHubのdb-backupブランチへバックアップpush"""
+    import subprocess
+    subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
+    subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
+
+    # --- ここから下は既存のバックアップ処理 ---
     today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
     backup_filename = f"attendance_{today}.db"
     backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
