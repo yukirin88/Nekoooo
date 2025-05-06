@@ -669,8 +669,8 @@ def average_sleep():
                 ORDER BY timestamp
             ''', (session['user_id'],)).fetchall()
 
+            # 記録がない場合でもページを開ける仕様
             if not data:
-                # データがない場合はエラーにせず、空リストやデフォルト値で描画
                 return render_template(
                     'average_sleep.html',
                     has_records=False,
@@ -685,7 +685,7 @@ def average_sleep():
                     round_decimal=round_decimal
                 )
 
-            # --- ここからは記録が1件以上ある場合の既存処理 ---
+            # 記録がある場合の処理
             sleep_times = []
             sleep_start = None
             for row in data:
