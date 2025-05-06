@@ -426,7 +426,6 @@ def like_record(record_id):
     
     try:
         with get_db_connection() as conn:
-            # すでにいいね済みか確認
             existing_like = conn.execute(
                 'SELECT id FROM likes WHERE user_id = ? AND record_id = ?',
                 (session['user_id'], record_id)
@@ -435,24 +434,26 @@ def like_record(record_id):
             if existing_like:
                 flash('すでにいいね済みです。', 'info')
             else:
-                # likesテーブルに新しいいいねを追加
                 conn.execute(
                     'INSERT INTO likes (user_id, record_id, timestamp) VALUES (?, ?, ?)',
                     (session['user_id'], record_id, jst_now())
                 )
-                
-                # recordsテーブルのlikes_countを更新
                 conn.execute(
                     'UPDATE records SET likes_count = likes_count + 1 WHERE id = ?',
                     (record_id,)
                 )
-                
                 conn.commit()
+                
+                # バックアップ
+                try:
+                    backup_db_to_github()
+                except Exception as e:
+                    app.logger.error(f"バックアップに失敗しました: {e}")
+                
                 flash('いいねしました！', 'success')
     except sqlite3.Error as e:
         flash(f'エラーが発生しました: {e}', 'error')
     
-    # from_pageに基づいてリダイレクト
     if from_page == 'index':
         return redirect(url_for('index'))
     elif from_page == 'all_records':
@@ -549,7 +550,13 @@ def register():
                 (username, hash_password(password), int(is_private))
             )
             conn.commit()
-            
+        
+        # バックアップ
+        try:
+            backup_db_to_github()
+        except Exception as e:
+            app.logger.error(f"バックアップに失敗しました: {e}")
+        
         flash('登録しました！', 'success')
         return redirect(url_for('login'))
         
@@ -578,6 +585,13 @@ def reset_password():
                     (hash_password(new_password), username)
                 )
                 conn.commit()
+                
+                # バックアップ
+                try:
+                    backup_db_to_github()
+                except Exception as e:
+                    app.logger.error(f"バックアップに失敗しました: {e}")
+                
                 flash('パスワードが更新されました。ログインしてください。', 'success')
                 return redirect(url_for('login'))
             else:
@@ -1129,48 +1143,51 @@ def toggle_privacy():
         
     return redirect(url_for('index'))
 
-@app.route('/delete_record/<int:record_id>', methods=['POST'])  # パラメータを明示的に指定
+@app.route('/delete_record/<int:record_id>', methods=['POST'])
 @login_required
-def delete_record(record_id):  # パラメータを受け取る
-    # 既存のコード
+def delete_record(record_id):
     try:
-        # リダイレクト先を取得（デフォルトはday_records）
         redirect_to = request.form.get('redirect_to', 'day_records')
         
         with get_db_connection() as conn:
-            # 記録が自分のものかチェック
-            record = conn.execute('''
+            record = conn.execute(
+                '''
                 SELECT * FROM records
                 WHERE id = ? AND user_id = ?
-            ''', (record_id, session['user_id'])).fetchone()
+                ''', (record_id, session['user_id'])
+            ).fetchone()
             
             if not record:
                 flash('記録が見つからないか、削除権限がありません。', 'error')
                 return redirect(url_for('index'))
             
-            # 記録の日付を取得
             record_date = datetime.fromisoformat(record['timestamp']).date()
             
-            # 記録を論理削除
-            conn.execute('''
+            conn.execute(
+                '''
                 UPDATE records
                 SET is_deleted = 1
                 WHERE id = ? AND user_id = ?
-            ''', (record_id, session['user_id']))
+                ''', (record_id, session['user_id'])
+            )
             conn.commit()
-            
-            flash('記録が削除されました。', 'success')
-            
-            # リダイレクト先の判断
-            if redirect_to == 'index':
-                return redirect(url_for('index'))
-            elif redirect_to == 'all_records':
-                # ページ番号とユーザーフィルターを保持
-                page = request.form.get('page', 1)
-                user_filter = request.form.get('user_filter', 'all')
-                return redirect(url_for('all_records', page=page, user_id=user_filter))
-            else:
-                return redirect(url_for('day_records', date=record_date.strftime('%Y-%m-%d')))
+        
+        # バックアップ
+        try:
+            backup_db_to_github()
+        except Exception as e:
+            app.logger.error(f"バックアップに失敗しました: {e}")
+        
+        flash('記録が削除されました。', 'success')
+        
+        if redirect_to == 'index':
+            return redirect(url_for('index'))
+        elif redirect_to == 'all_records':
+            page = request.form.get('page', 1)
+            user_filter = request.form.get('user_filter', 'all')
+            return redirect(url_for('all_records', page=page, user_id=user_filter))
+        else:
+            return redirect(url_for('day_records', date=record_date.strftime('%Y-%m-%d')))
                 
     except sqlite3.Error as e:
         flash(f'記録の削除中にエラーが発生しました: {e}', 'error')
@@ -1292,6 +1309,12 @@ def admin_add_record():
             
             conn.commit()
 
+        # バックアップ
+        try:
+            backup_db_to_github()
+        except Exception as e:
+            app.logger.error(f"バックアップに失敗しました: {e}")
+
         # 該当ユーザーに通知メッセージを設定
         session[f'user_{user_id}_message'] = "管理者が記録を追加しました。"
 
@@ -1306,29 +1329,29 @@ def admin_add_record():
 def admin_delete_record(record_id):
     try:
         with get_db_connection() as conn:
-            # 記録が存在するか確認
             record = conn.execute('SELECT * FROM records WHERE id = ?', (record_id,)).fetchone()
             if not record:
                 flash('記録が見つかりません。', 'error')
                 return redirect(url_for('admin_dashboard'))
 
-            # 記録を論理削除
             conn.execute('UPDATE records SET is_deleted = 1 WHERE id = ?', (record_id,))
             conn.commit()
-
-            flash('記録が削除されました。', 'success')
-
-        # 削除後、ユーザーの「記録を見る」画面にリダイレクト
+        
+        # バックアップ
+        try:
+            backup_db_to_github()
+        except Exception as e:
+            app.logger.error(f"バックアップに失敗しました: {e}")
+        
+        flash('記録が削除されました。', 'success')
         return redirect(url_for('admin_user_records', user_id=record['user_id']))
     except Exception as e:
         flash(f'記録削除中にエラーが発生しました: {e}', 'danger')
         return redirect(url_for('admin_dashboard'))
 
-@app.route('/delete_user/<int:user_id>', methods=['POST'])  # パラメータを明示的に指定
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
 @admin_required
-def delete_user(user_id):  # パラメータを受け取る
-    # 既存のコード
-    # 関数の内容
+def delete_user(user_id):
     # 自分自身は削除できない
     if user_id == session.get('user_id'):
         flash('自分自身を削除することはできません。', 'error')
@@ -1359,7 +1382,13 @@ def delete_user(user_id):  # パラメータを受け取る
             
             # トランザクションコミット
             conn.commit()
-            
+
+            # バックアップ
+            try:
+                backup_db_to_github()
+            except Exception as e:
+                app.logger.error(f"バックアップに失敗しました: {e}")
+
             flash('ユーザーが削除されました。', 'success')
         except sqlite3.Error as e:
             # エラー時はロールバック
