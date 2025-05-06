@@ -635,17 +635,21 @@ def record():
             conn.commit()
             flash('記録が正常に保存されました', 'success')
 
-            # 記録ごとにバックアップ
-            try:
-                backup_db_to_github()
-            except Exception as e:
-                app.logger.error(f"バックアップに失敗しました: {e}")
+        # 記録ごとにバックアップ（DB接続の外で実行するのが安全です）
+        try:
+            backup_db_to_github()
+        except Exception as e:
+            app.logger.error(f"バックアップに失敗しました: {e}")
+            flash('バックアップに失敗しました', 'warning')
 
     except sqlite3.Error as e:
-        conn.rollback()
         error_message = f'データベースエラー: {str(e)}'
         app.logger.error(error_message)
         flash(error_message, 'danger')
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     except Exception as e:
         error_message = f'予期せぬエラー: {str(e)}'
         app.logger.error(error_message)
