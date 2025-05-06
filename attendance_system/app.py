@@ -25,33 +25,25 @@ DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
 def backup_db_to_github():
     import subprocess
-    subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
-    subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
-
-    # --- ここから下は既存のバックアップ処理 ---
-    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
-    backup_filename = f"attendance_{today}.db"
-    backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
-    shutil.copyfile(DATABASE_PATH, backup_path)
-
-    repo_url = "https://github.com/yukirin88/Nekoooo.git"
-    branch = "db-backup"
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
-    if not token:
-        print("GitHubトークンが設定されていません")
-        return
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        subprocess.run([
-            "git", "clone", "--branch", branch,
-            f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir
-        ], check=True)
-        dst = os.path.join(tmpdir, backup_filename)
-        shutil.copyfile(backup_path, dst)
-        subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
-        subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
-        subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
-    print("バックアップをGitHubにpushしました")
+    import os
+    try:
+        subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
+        subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
+        # ...（省略）...
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run([
+                "git", "clone", "--branch", branch,
+                f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir
+            ], check=True)
+            dst = os.path.join(tmpdir, backup_filename)
+            shutil.copyfile(backup_path, dst)
+            subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
+            subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
+            subprocess.run(["git", "pull", "origin", branch], cwd=tmpdir, check=False)  # 追加
+            subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
+        print("バックアップをGitHubにpushしました")
+    except subprocess.CalledProcessError as e:
+        print("バックアップコマンド失敗:", e)
 
 # Flaskアプリの初期化
 app = Flask(__name__, template_folder='templates')
