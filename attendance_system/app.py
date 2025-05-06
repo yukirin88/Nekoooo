@@ -26,11 +26,27 @@ DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 def backup_db_to_github():
     import subprocess
     import os
+    import shutil
+    import tempfile
+    from datetime import datetime
+    import pytz
+
+    # 必要な変数をすべて関数内で定義
     branch = "db-backup"
+    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
+    backup_filename = f"attendance_{today}.db"
+    backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
+    if not token:
+        print("GitHubトークンが設定されていません")
+        return
+
     try:
         subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
         subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
-        # ...（省略）...
+
+        shutil.copyfile(DATABASE_PATH, backup_path)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run([
                 "git", "clone", "--branch", branch,
@@ -40,7 +56,7 @@ def backup_db_to_github():
             shutil.copyfile(backup_path, dst)
             subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
             subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "pull", "origin", branch], cwd=tmpdir, check=False)  # 追加
+            subprocess.run(["git", "pull", "origin", branch], cwd=tmpdir, check=False)
             subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
         print("バックアップをGitHubにpushしました")
     except subprocess.CalledProcessError as e:
