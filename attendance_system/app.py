@@ -26,6 +26,7 @@ DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 def backup_db_to_github():
     import subprocess
     import os
+    branch = "db-backup"
     try:
         subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
         subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
