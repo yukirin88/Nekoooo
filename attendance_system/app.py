@@ -26,26 +26,23 @@ DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 import sqlite3
 import os
 
+# ここにis_db_empty関数
 def is_db_empty(db_path):
     if not os.path.exists(db_path):
         return True
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        # ユーザーテーブルが存在しなければ空
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         if not cur.fetchone():
             return True
-        # レコードがなければ空
         cur.execute("SELECT COUNT(*) FROM users")
         if cur.fetchone()[0] == 0:
             return True
-        # さらに記録テーブルもチェックしても良い
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'")
         if not cur.fetchone():
             return True
         cur.execute("SELECT COUNT(*) FROM records")
-        # ユーザーも記録もない場合は空
         if cur.fetchone()[0] == 0:
             return True
         return False
@@ -55,7 +52,7 @@ def is_db_empty(db_path):
         if 'conn' in locals():
             conn.close()
 
-# バックアップ時の呼び出し例
+# ここにbackup_db_to_github関数
 def backup_db_to_github():
     if is_db_empty(DATABASE_PATH):
         print("DBが空のためバックアップをスキップします")
