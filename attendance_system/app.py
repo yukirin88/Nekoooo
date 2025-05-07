@@ -25,26 +25,46 @@ DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
 import sqlite3
 import os
+import shutil
+import subprocess
+import tempfile
+from datetime import datetime
+import pytz
 
-# ここにis_db_empty関数
+# 定数定義
+DATABASE_PATH = "attendance.db"
+GIT_USER_EMAIL = "konosuke.hirata@gmail.com"
+GIT_USER_NAME = "yukirin88"
+TIMEZONE = pytz.timezone('Asia/Tokyo')
+
 def is_db_empty(db_path):
+    """DBが空かどうかをチェックする関数"""
     if not os.path.exists(db_path):
         return True
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
+        
+        # ユーザーテーブルの存在確認
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         if not cur.fetchone():
             return True
+            
+        # ユーザーレコードの存在確認
         cur.execute("SELECT COUNT(*) FROM users")
         if cur.fetchone()[0] == 0:
             return True
+            
+        # 記録テーブルの存在確認
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'")
         if not cur.fetchone():
             return True
+            
+        # 記録レコードの存在確認
         cur.execute("SELECT COUNT(*) FROM records")
         if cur.fetchone()[0] == 0:
             return True
+            
         return False
     except Exception:
         return True
@@ -52,68 +72,57 @@ def is_db_empty(db_path):
         if 'conn' in locals():
             conn.close()
 
-# ここにbackup_db_to_github関数
 def backup_db_to_github():
+    """GitHubにDBをバックアップする関数"""
     if is_db_empty(DATABASE_PATH):
         print("DBが空のためバックアップをスキップします")
         return
 
-import shutil
-import datetime
-import subprocess
-
-def backup_db_to_github():
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    backup_filename = f"attendance_{today}.db"
-    shutil.copyfile("attendance.db", backup_filename)
-
-    # Git操作
-    subprocess.run(["git", "checkout", "db-backup"])
-    subprocess.run(["git", "add", backup_filename])
-    subprocess.run(["git", "commit", "-m", f"Auto backup {today}"])
-    subprocess.run(["git", "push", "origin", "db-backup"])
-    subprocess.run(["git", "checkout", "main"])
-
-def backup_db_to_github():
-    import subprocess
-    import os
-    import shutil
-    import tempfile
-    from datetime import datetime
-    import pytz
-
-    # 必要な変数をすべて関数内で定義
-    branch = "db-backup"
-    today = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y-%m-%d')
-    backup_filename = f"attendance_{today}.db"
-    backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
+    # 環境変数からトークン取得
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
     if not token:
         print("GitHubトークンが設定されていません")
         return
 
     try:
-        subprocess.run(['git', 'config', '--global', 'user.email', 'konosuke.hirata@gmail.com'], check=True)
-        subprocess.run(['git', 'config', '--global', 'user.name', 'yukirin88'], check=True)
+        # Git設定
+        subprocess.run(['git', 'config', '--global', 'user.email', GIT_USER_EMAIL], check=True)
+        subprocess.run(['git', 'config', '--global', 'user.name', GIT_USER_NAME], check=True)
 
+        # バックアップファイル作成
+        today = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
+        backup_filename = f"attendance_{today}.db"
+        backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
         shutil.copyfile(DATABASE_PATH, backup_path)
 
+        # 一時ディレクトリでGit操作
         with tempfile.TemporaryDirectory() as tmpdir:
+            repo_url = f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git"
+            
+            # リポジトリをクローン
             subprocess.run([
-                "git", "clone", "--branch", branch,
-                f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git", tmpdir
+                "git", "clone", "--branch", "db-backup",
+                repo_url, tmpdir
             ], check=True)
+            
+            # ファイルコピー
             dst = os.path.join(tmpdir, backup_filename)
             shutil.copyfile(backup_path, dst)
+            
+            # コミット＆プッシュ
             subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
             subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "pull", "origin", branch], cwd=tmpdir, check=False)
-            subprocess.run(["git", "push", "origin", branch], cwd=tmpdir, check=True)
+            subprocess.run(["git", "pull", "origin", "db-backup"], cwd=tmpdir, check=False)
+            subprocess.run(["git", "push", "origin", "db-backup"], cwd=tmpdir, check=True)
+            
         print("バックアップをGitHubにpushしました")
-    except subprocess.CalledProcessError as e:
-        print("バックアップコマンド失敗:", e)
 
-# Flaskアプリの初期化
+    except subprocess.CalledProcessError as e:
+        print(f"バックアップ処理中にエラーが発生しました: {str(e)}")
+    except Exception as e:
+        print(f"予期せぬエラーが発生しました: {str(e)}")
+
+# Flaskアプリの初期化処理（必要に応じて）
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
 CORS(app)
