@@ -23,6 +23,22 @@ DATABASE_URL = None  # ← SQLite を使わせる
 RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
 DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
+import shutil
+import datetime
+import subprocess
+
+def backup_db_to_github():
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    backup_filename = f"attendance_{today}.db"
+    shutil.copyfile("attendance.db", backup_filename)
+
+    # Git操作
+    subprocess.run(["git", "checkout", "db-backup"])
+    subprocess.run(["git", "add", backup_filename])
+    subprocess.run(["git", "commit", "-m", f"Auto backup {today}"])
+    subprocess.run(["git", "push", "origin", "db-backup"])
+    subprocess.run(["git", "checkout", "main"])
+
 def backup_db_to_github():
     import subprocess
     import os
