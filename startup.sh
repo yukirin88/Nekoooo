@@ -35,6 +35,11 @@ else
   curl -s -H "Authorization: token $TOKEN" \
        -o attendance.db \
        "https://raw.githubusercontent.com/$REPO/$BRANCH/$LATEST_DB"
+  # ファイルサイズが1KB未満なら空DBとみなして削除
+  if [ -f attendance.db ] && [ $(stat -c%s "attendance.db") -lt 1024 ]; then
+    echo "⚠️ ダウンロードしたDBが空または異常です。attendance.dbを削除します。"
+    rm attendance.db
+  fi
 fi
 
 gunicorn attendance_system.app:app
