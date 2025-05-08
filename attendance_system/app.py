@@ -1,13 +1,15 @@
 from decimal import Decimal, ROUND_HALF_UP
+
 import sys
 import os
 import shutil
 import tempfile
 import subprocess
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
 from flask_bootstrap import Bootstrap
-from flask import jsonify
 from flask_cors import CORS
+
 from datetime import datetime, timedelta
 from functools import wraps
 import sqlite3
@@ -17,27 +19,15 @@ import pytz
 import psycopg2
 from psycopg2.extras import DictCursor
 
-# セッション設定・DBパスなどの定義をimport群の直後に
+# セッション設定・DBパスなどの定義
 DATABASE_URL = os.environ.get('DATABASE_URL')
-DATABASE_URL = None  # ← SQLite を使わせる
+DATABASE_URL = None  # SQLite を使う
 RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
 DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
 
-import sqlite3
-import os
-import shutil
-import subprocess
-import tempfile
-from datetime import datetime
-import pytz
-
-# 定数定義
-DATABASE_PATH = "attendance.db"
 GIT_USER_EMAIL = "konosuke.hirata@gmail.com"
 GIT_USER_NAME = "yukirin88"
 TIMEZONE = pytz.timezone('Asia/Tokyo')
-
-import os
 
 def ensure_db_directory_exists(db_path):
     db_dir = os.path.dirname(db_path)
@@ -48,7 +38,6 @@ def get_db_connection():
     ensure_db_directory_exists(DATABASE_PATH)
     return sqlite3.connect(DATABASE_PATH)
 
-
 def is_db_empty(db_path):
     """DBが空かどうかをチェックする関数"""
     if not os.path.exists(db_path):
@@ -56,27 +45,18 @@ def is_db_empty(db_path):
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        
-        # ユーザーテーブルの存在確認
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
         if not cur.fetchone():
             return True
-            
-        # ユーザーレコードの存在確認
         cur.execute("SELECT COUNT(*) FROM users")
         if cur.fetchone()[0] == 0:
             return True
-            
-        # 記録テーブルの存在確認
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'")
         if not cur.fetchone():
             return True
-            
-        # 記録レコードの存在確認
         cur.execute("SELECT COUNT(*) FROM records")
         if cur.fetchone()[0] == 0:
             return True
-            
         return False
     except Exception:
         return True
@@ -89,52 +69,32 @@ def backup_db_to_github():
     if is_db_empty(DATABASE_PATH):
         print("DBが空のためバックアップをスキップします")
         return
-
-    # 環境変数からトークン取得
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
     if not token:
         print("GitHubトークンが設定されていません")
         return
-
     try:
-        # Git設定
         subprocess.run(['git', 'config', '--global', 'user.email', GIT_USER_EMAIL], check=True)
         subprocess.run(['git', 'config', '--global', 'user.name', GIT_USER_NAME], check=True)
-
-        # バックアップファイル作成
         today = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
         backup_filename = f"attendance_{today}.db"
         backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
         shutil.copyfile(DATABASE_PATH, backup_path)
-
-        # 一時ディレクトリでGit操作
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_url = f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git"
-            
-            # リポジトリをクローン
-            subprocess.run([
-                "git", "clone", "--branch", "db-backup",
-                repo_url, tmpdir
-            ], check=True)
-            
-            # ファイルコピー
+            subprocess.run(["git", "clone", "--branch", "db-backup", repo_url, tmpdir], check=True)
             dst = os.path.join(tmpdir, backup_filename)
             shutil.copyfile(backup_path, dst)
-            
-            # コミット＆プッシュ
             subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
             subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
             subprocess.run(["git", "pull", "origin", "db-backup"], cwd=tmpdir, check=False)
             subprocess.run(["git", "push", "origin", "db-backup"], cwd=tmpdir, check=True)
-            
         print("バックアップをGitHubにpushしました")
-
     except subprocess.CalledProcessError as e:
         print(f"バックアップ処理中にエラーが発生しました: {str(e)}")
     except Exception as e:
         print(f"予期せぬエラーが発生しました: {str(e)}")
 
-# Flaskアプリの初期化処理（必要に応じて）
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
 CORS(app)
@@ -146,7 +106,6 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=2)
 )
 
-# ユーティリティ関数
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
