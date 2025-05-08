@@ -37,6 +37,18 @@ GIT_USER_EMAIL = "konosuke.hirata@gmail.com"
 GIT_USER_NAME = "yukirin88"
 TIMEZONE = pytz.timezone('Asia/Tokyo')
 
+import os
+
+def ensure_db_directory_exists(db_path):
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+
+def get_db_connection():
+    ensure_db_directory_exists(DATABASE_PATH)
+    return sqlite3.connect(DATABASE_PATH)
+
+
 def is_db_empty(db_path):
     """DBが空かどうかをチェックする関数"""
     if not os.path.exists(db_path):
