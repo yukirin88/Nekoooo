@@ -52,7 +52,7 @@ def ensure_db_directory_exists(db_path_to_check=DATABASE_PATH):
             print(f"ディレクトリ {db_dir} の作成に失敗しました: {e}")
             raise
 
-# --- GitHubバックアップ・リストア関連 (内容は前回提供から変更なし) ---
+# --- GitHubバックアップ・リストア関連 ---
 def is_db_empty(db_path_to_check=DATABASE_PATH):
     if not os.path.exists(db_path_to_check): return True
     try:
@@ -205,39 +205,25 @@ def calc_avg_generic(s_list):
     durs=[i['duration'] for i in s_list]; days=len(durs); avg_d=sum(durs)/days if days>0 else 0
     return {'avg_hours':int(avg_d),'avg_minutes':int((avg_d-int(avg_d))*60),'evaluation':eval_sleep(avg_d) if days>=3 else "-",'avg_duration':avg_d,'record_days':days}
 
-def group_by_period_generic(s_times,key_f,name_f_detailed): # name_f_detailed を使用
+def group_by_period_generic(s_times,key_f,name_f_detailed):
     if not s_times: return []
     grouped={}; [grouped.setdefault(key_f(i),[]).append(i['duration']) for i in s_times]
     avgs=[{**calc_avg_generic([{'duration':d} for d in durs]),'period':name_f_detailed(k)[0],'start_date':name_f_detailed(k)[1]} for k,durs in grouped.items()]
     avgs.sort(key=lambda x:x['start_date'],reverse=True); return avgs
 
-# calculate_weekly_average_sleep のリファクタリング
 def weekly_period_name_and_date(k_val):
     year_str, week_num_str = k_val.split('-W')
-    # %Y-%W-%w (週の始まりを日曜とする場合) または %Y-%W-%u (月曜とする場合)
-    # Pythonの isocalendar().week はISO 8601週番号（月曜始まり）なので、strptimeもそれに合わせるのが一般的
-    # %W は月曜始まりの週番号（00-53）。%w は曜日（0が日曜）。
-    # '%Y-%W-%w' で週の初め(日曜)を取得し、+1で月曜にするか、または '%Y-%W-%u' (uは1-7で月曜が1)
-    # ここでは元の '%Y-%W-%w' を使い、これが週の最初の曜日(e.g. Sunday)を指すと仮定。
-    # もし isocalendar() の週番号と合わせるなら %G-%V-%u のような形式でISO週を扱う。
-    # 元のコードは '%Y-%W-%w' で、週の開始日を1(月曜)としていた。
-    # datetime.strptime(f'{year_str}-{week_num_str}-1', '%Y-%W-%w') -> 年-週番号-月曜日
-    
-    # ISOWEEK (週の始まりを月曜とする場合)
-    start_date_obj = datetime.strptime(f"{year_str}-W{week_num_str}-1", "%Y-W%W-%w").date() # 月曜日
-    # start_date_obj = datetime.fromisocalendar(int(year_str), int(week_num_str), 1) # ISO週の場合 (より正確)
-
-    end_date_obj = start_date_obj + timedelta(days=6) # 日曜日
+    start_date_obj = datetime.strptime(f"{year_str}-W{week_num_str}-1", "%Y-W%W-%w").date()
+    end_date_obj = start_date_obj + timedelta(days=6)
     period_str = f"{start_date_obj.strftime('%Y/%m/%d')}～{end_date_obj.strftime('%Y/%m/%d')}"
     return period_str, start_date_obj
 
 def calc_weekly_avg(s_times):
     kf=lambda i:f"{i['year']}-W{i['week']:02d}"
-    return group_by_period_generic(s_times,kf,weekly_period_name_and_date) # 修正
+    return group_by_period_generic(s_times,kf,weekly_period_name_and_date)
 
 def calc_monthly_avg(s_times):
     kf=lambda i:f"{i['year']}-{i['month']:02d}"
-    # name_f はシンプルなのでラムダのままでも良いが、一貫性のために通常関数にしても良い
     def monthly_period_name_and_date(k_val):
         year_str, month_str = k_val.split('-')
         year_int, month_int = int(year_str), int(month_str)
@@ -265,22 +251,21 @@ def index():
     with get_db_connection() as conn:
         s_jst=TIMEZONE.localize(datetime.combine(jst_now().date(),datetime.min.time())); e_jst=s_jst+timedelta(days=1)
         s_utc,e_utc=s_jst.astimezone(pytz.utc).isoformat(),e_jst.astimezone(pytz.utc).isoformat()
-        total=conn.execute("SELECT COUNT(*) FROM records WHERE user_id=? AND is_deleted=0 AND timestamp>=? AND timestamp < ?",(session['user_id'],s_utc,e_utc)).fetchone()[0] # SQL修正
-        raw=conn.execute("SELECT id,action,memo,likes_count,timestamp,is_private FROM records WHERE user_id=? AND is_deleted=0 AND timestamp>=? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",(session['user_id'],s_utc,e_utc,pp,off)).fetchall() # SQL修正
+        total=conn.execute("SELECT COUNT(*) FROM records WHERE user_id=? AND is_deleted=0 AND timestamp>=? AND timestamp < ?",(session['user_id'],s_utc,e_utc)).fetchone()[0]
+        raw=conn.execute("SELECT id,action,memo,likes_count,timestamp,is_private FROM records WHERE user_id=? AND is_deleted=0 AND timestamp>=? AND timestamp < ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",(session['user_id'],s_utc,e_utc,pp,off)).fetchall()
         recs=[{**dict(r),'formatted_date':datetime.fromisoformat(r['timestamp']).astimezone(TIMEZONE).strftime('%Y-%m-%d'),'formatted_time':datetime.fromisoformat(r['timestamp']).astimezone(TIMEZONE).strftime('%H:%M:%S')} for r in raw]
         total_pg=(total+pp-1)//pp
     return render_template("index.html",records=recs,is_private=session.get('is_private',False),user_message=msg,page=pg,total_pages=total_pg)
 
-@app.route('/like_record/<int:record_id>', methods=['POST']) # Route修正
+@app.route('/like_record/<int:record_id>', methods=['POST'])
 @login_required
 def like_record(record_id):
     with get_db_connection() as conn:
         try:
-            if conn.execute('SELECT id FROM likes WHERE user_id=? AND record_id=?',(session['user_id'],record_id)).fetchone(): flash('すでにいいね済み。','info')
+            if conn.execute('SELECT id FROM likes WHERE user_id=? AND record_id=?',(session['user_id'],record_id)).fetchone(): flash('すでにいいね済みです。','info')
             else: conn.execute('BEGIN'); conn.execute('INSERT INTO likes (user_id,record_id,timestamp) VALUES (?,?,?)',(session['user_id'],record_id,jst_now().isoformat())); conn.execute('UPDATE records SET likes_count=likes_count+1 WHERE id=?',(record_id,)); conn.commit(); flash('いいねしました！','success'); backup_database_to_github()
         except Exception as e: conn.rollback(); flash(f'エラー: {e}','danger')
     return redirect(request.form.get('redirect_to') or request.referrer or url_for('index'))
-
 
 @app.route('/calendar', methods=['GET'])
 @login_required
@@ -293,7 +278,7 @@ def calendar_view():
 def login():
     if request.method=='POST':
         u,p=request.form.get('username','').strip(),request.form.get('password','')
-        if not u or not p:flash('ユーザー名とパスワードを入力。','error');return render_template('login.html')
+        if not u or not p:flash('ユーザー名とパスワードを入力してください。','error');return render_template('login.html')
         with get_db_connection() as c:user=c.execute('SELECT * FROM users WHERE username=?',(u,)).fetchone()
         if user and user['password']==hash_password(p):
             session.clear();session.permanent=True;session['user_id']=user['id'];session['username']=user['username'];session['is_admin']=bool(user['is_admin']);session['is_private']=bool(user['is_private'])
@@ -305,10 +290,10 @@ def login():
 def register():
     if request.method=='POST':
         u,p,is_priv=request.form.get('username','').strip(),request.form.get('password',''),request.form.get('is_private')=='on'
-        if not u or not p:flash('ユーザー名とパスワードを入力。','error');return render_template('register.html')
+        if not u or not p:flash('ユーザー名とパスワードを入力してください。','error');return render_template('register.html')
         with get_db_connection() as c:
-            try:c.execute('INSERT INTO users(username,password,is_private,created_at)VALUES(?,?,?,?)',(u,hash_password(p),int(is_priv),jst_now().isoformat()));c.commit();flash('登録成功！ログイン。','success');backup_database_to_github();return redirect(url_for('login'))
-            except sqlite3.IntegrityError:c.rollback();flash('このユーザー名は既に使用。','error')
+            try:c.execute('INSERT INTO users(username,password,is_private,created_at)VALUES(?,?,?,?)',(u,hash_password(p),int(is_priv),jst_now().isoformat()));c.commit();flash('登録しました！ログインしてください。','success');backup_database_to_github();return redirect(url_for('login'))
+            except sqlite3.IntegrityError:c.rollback();flash('このユーザー名は既に存在しています。','error')
             except sqlite3.Error as e:c.rollback();flash(f'登録中DBエラー:{e}','error')
     return render_template('register.html')
 
@@ -322,13 +307,13 @@ def reset_password():
         u,np=request.form.get('username','').strip(),request.form.get('new_password','')
         if not u or not np:flash('ユーザー名と新パスワード入力。','error');return render_template('reset_password.html')
         with get_db_connection() as c:
-            if c.execute('SELECT id FROM users WHERE username=?',(u,)).fetchone():c.execute('UPDATE users SET password=? WHERE username=?',(hash_password(np),u));c.commit();flash('パスワード更新。ログイン。','success');backup_database_to_github();return redirect(url_for('login'))
-            else:flash('指定ユーザー名見つからず。','error')
+            if c.execute('SELECT id FROM users WHERE username=?',(u,)).fetchone():c.execute('UPDATE users SET password=? WHERE username=?',(hash_password(np),u));c.commit();flash('パスワードを更新しました。ログインしてください。','success');backup_database_to_github();return redirect(url_for('login'))
+            else:flash('指定ユーザー名が見つかりません。','error')
     return render_template('reset_password.html')
 
 @app.route('/logout')
 @login_required
-def logout():session.clear();flash('ログアウト。','info');return redirect(url_for('login'))
+def logout():session.clear();flash('ログアウトしました。','info');return redirect(url_for('login'))
 
 @app.route('/record',methods=['POST'])
 @login_required
@@ -340,9 +325,9 @@ def record_action():
         try:
             s_jst=TIMEZONE.localize(datetime.combine(jst_now().date(),datetime.min.time()));e_jst=s_jst+timedelta(days=1)
             s_utc,e_utc=s_jst.astimezone(pytz.utc).isoformat(),e_jst.astimezone(pytz.utc).isoformat()
-            count=c.execute("SELECT COUNT(*)FROM records WHERE user_id=? AND action=? AND timestamp>=? AND timestamp < ? AND is_deleted=0",(session['user_id'],act,s_utc,e_utc)).fetchone()[0] # SQL修正
-            if(act=='sleep' and count>=2)or(act=='wake_up' and count>=1):flash(f'本日{count+1}回目「{act}」記録不可。','warning');return redirect(url_for('index'))
-            c.execute('INSERT INTO records(user_id,action,timestamp,memo,is_private)VALUES(?,?,?,?,?)',(session['user_id'],act,ts_save,mem,int(is_priv)));c.commit();flash('記録保存。','success');backup_database_to_github()
+            count=c.execute("SELECT COUNT(*)FROM records WHERE user_id=? AND action=? AND timestamp>=? AND timestamp < ? AND is_deleted=0",(session['user_id'],act,s_utc,e_utc)).fetchone()[0]
+            if(act=='sleep' and count>=2)or(act=='wake_up' and count>=1):flash(f'本日{count+1}回目「{act}」記録できません。','warning');return redirect(url_for('index'))
+            c.execute('INSERT INTO records(user_id,action,timestamp,memo,is_private)VALUES(?,?,?,?,?)',(session['user_id'],act,ts_save,mem,int(is_priv)));c.commit();flash('記録を保存しました。','success');backup_database_to_github()
         except sqlite3.Error as e:c.rollback();flash(f'DBエラー:{e}','danger');app.logger.error(f"Record DB error:{e}")
     return redirect(url_for('index'))
 
@@ -355,7 +340,7 @@ def average_sleep_view():
     s_times.sort(key=lambda x:x['date'],reverse=True)
     return render_template('average_sleep.html',has_records=True,sleep_times=s_times,overall_avg=overall,weekly_avg=weekly,monthly_avg=monthly,comparisons=comps,period=p,evaluate_sleep=eval_sleep,round_decimal=rnd_dec)
 
-@app.route('/day_records/<date>') # Route修正
+@app.route('/day_records/<date>')
 @login_required
 def day_records(date):
     try:p_date=datetime.strptime(date,'%Y-%m-%d').date()
@@ -366,14 +351,14 @@ def day_records(date):
         s_jst=TIMEZONE.localize(datetime.combine(p_date,datetime.min.time()));e_jst=s_jst+timedelta(days=1)
         s_utc,e_utc=s_jst.astimezone(pytz.utc).isoformat(),e_jst.astimezone(pytz.utc).isoformat()
         q="SELECT r.*,u.username FROM records r JOIN users u ON r.user_id=u.id WHERE "
-        params_list = [] # ミュータブルなリストを使用
+        params_list = []
         if is_adm:
-            q+="r.timestamp>=? AND r.timestamp < ? ORDER BY u.username ASC,r.timestamp ASC" # SQL修正
+            q+="r.timestamp>=? AND r.timestamp < ? ORDER BY u.username ASC,r.timestamp ASC"
             params_list.extend([s_utc,e_utc])
         else:
-            q+="r.user_id=? AND r.timestamp>=? AND r.timestamp < ? ORDER BY r.timestamp ASC" # SQL修正
+            q+="r.user_id=? AND r.timestamp>=? AND r.timestamp < ? ORDER BY r.timestamp ASC"
             params_list.extend([uid,s_utc,e_utc])
-        raw=c.execute(q,tuple(params_list)).fetchall() # タプルに変換して実行
+        raw=c.execute(q,tuple(params_list)).fetchall()
         recs=[{**dict(r),'formatted_time':datetime.fromisoformat(r['timestamp']).astimezone(TIMEZONE).strftime('%H:%M:%S'),'formatted_date':datetime.fromisoformat(r['timestamp']).astimezone(TIMEZONE).strftime('%Y-%m-%d')} for r in raw]
     return render_template('day_records.html',date=p_date.strftime('%Y-%m-%d'),records=recs,is_admin=is_adm,sleep_duration_hours=s_h,sleep_duration_minutes=s_m,sleep_evaluation=s_eval,year=p_date.year,month=p_date.month)
 
@@ -402,15 +387,15 @@ def toggle_privacy():
         except sqlite3.Error as e:flash(f'プライバシー設定更新中エラー:{e}','error')
     return redirect(url_for('index'))
 
-@app.route('/delete_record/<int:record_id>', methods=['POST']) # Route修正
+@app.route('/delete_record/<int:record_id>', methods=['POST'])
 @login_required
 def delete_record(record_id):
     r_to,d_r,pg_n,u_f=request.form.get('redirect_to','index'),request.form.get('date_val'),request.form.get('page_num','1'),request.form.get('user_filter_val','all')
     with get_db_connection() as c:
         owner=c.execute('SELECT user_id FROM records WHERE id=? AND is_deleted=0',(record_id,)).fetchone()
-        if not owner or(owner['user_id']!=session['user_id'] and not session.get('is_admin')):flash('記録無か削除権限なし。','error')
+        if not owner or(owner['user_id']!=session['user_id'] and not session.get('is_admin')):flash('削除権限がありません。','error')
         else:
-            try:c.execute('BEGIN');c.execute('DELETE FROM likes WHERE record_id=?',(record_id,));c.execute('UPDATE records SET is_deleted=1 WHERE id=?',(record_id,));c.commit();flash('記録削除。','success');backup_database_to_github()
+            try:c.execute('BEGIN');c.execute('DELETE FROM likes WHERE record_id=?',(record_id,));c.execute('UPDATE records SET is_deleted=1 WHERE id=?',(record_id,));c.commit();flash('記録を削除しました。','success');backup_database_to_github()
             except sqlite3.Error as e:c.rollback();flash(f'記録削除中エラー:{e}','error')
     if r_to=='all_records':return redirect(url_for('all_records',page=pg_n,user_id=u_f))
     if r_to=='day_records' and d_r:return redirect(url_for('day_records',date=d_r))
@@ -428,13 +413,13 @@ def admin_dashboard():
         total_pg=(total+pp-1)//pp
     return render_template("admin_dashboard.html",users=users,records=recs,page=pg,total_pages=total_pg)
 
-@app.route('/admin/user_records/<int:user_id>') # Route修正
+@app.route('/admin/user_records/<int:user_id>')
 @admin_required
 def admin_user_records(user_id):
     pg,pp,off=request.args.get('page',1,type=int),20,0;off=(pg-1)*pp
     with get_db_connection() as c:
         user=c.execute('SELECT id,username FROM users WHERE id=?',(user_id,)).fetchone()
-        if not user:flash('ユーザー見つからず。','error');return redirect(url_for('admin_dashboard'))
+        if not user:flash('ユーザーが見つかりません。','error');return redirect(url_for('admin_dashboard'))
         total_u=c.execute('SELECT COUNT(*)FROM records WHERE user_id=? AND is_deleted=0',(user_id,)).fetchone()[0]
         raw_u=c.execute("SELECT * FROM records WHERE user_id=? AND is_deleted=0 ORDER BY timestamp DESC LIMIT ? OFFSET ?",(user_id,pp,off)).fetchall()
         u_recs=[{**dict(r),'formatted_time':datetime.fromisoformat(r['timestamp']).astimezone(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')} for r in raw_u]
@@ -457,14 +442,14 @@ def admin_add_record():
     with get_db_connection() as c:users=c.execute('SELECT id,username FROM users WHERE is_admin=0 ORDER BY username').fetchall()
     return render_template('admin_add_record.html',users=users)
 
-@app.route('/admin/delete_record/<int:record_id>', methods=['POST']) # Route修正
+@app.route('/admin/delete_record/<int:record_id>', methods=['POST'])
 @admin_required
 def admin_delete_record(record_id):
     uid_r=None
     with get_db_connection() as c:
         try:
             rec_d=c.execute('SELECT user_id FROM records WHERE id=?',(record_id,)).fetchone()
-            if not rec_d:flash('記録見つからず。','error');return redirect(url_for('admin_dashboard'))
+            if not rec_d:flash('記録が見つかりません。','error');return redirect(url_for('admin_dashboard'))
             uid_r=rec_d['user_id']
             c.execute('BEGIN');c.execute('DELETE FROM likes WHERE record_id=?',(record_id,));c.execute('DELETE FROM records WHERE id=?',(record_id,));c.commit()
             flash('記録完全削除。','success');backup_database_to_github()
@@ -472,7 +457,7 @@ def admin_delete_record(record_id):
     if uid_r:return redirect(url_for('admin_user_records',user_id=uid_r))
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/delete_user/<int:user_id>', methods=['POST']) # Route修正
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
 @admin_required
 def delete_user(user_id):
     if user_id==session.get('user_id'):flash('自分自身削除不可。','error');return redirect(url_for('admin_dashboard'))
