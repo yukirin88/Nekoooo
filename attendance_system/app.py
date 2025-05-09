@@ -1,15 +1,12 @@
 from decimal import Decimal, ROUND_HALF_UP
-
 import sys
 import os
 import shutil
 import tempfile
 import subprocess
-
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
 from flask_bootstrap import Bootstrap
 from flask_cors import CORS
-
 from datetime import datetime, timedelta
 from functools import wraps
 import sqlite3
@@ -19,86 +16,25 @@ import pytz
 import psycopg2
 from psycopg2.extras import DictCursor
 
-# セッション設定・DBパスなどの定義
+# --- グローバル設定 ---
+# 環境変数からGitHub関連情報を取得
+GITHUB_USERNAME = os.environ.get("GITHUB_USERNAME")
+GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY") # 例: "username/repository_name"
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GIT_USER_EMAIL = os.environ.get("GIT_USER_EMAIL", "konosuke.hirata@gmail.com") # フォールバック値
+GIT_USER_NAME = os.environ.get("GIT_USER_NAME", "yukirin88") # フォールバック値
+
 DATABASE_URL = os.environ.get('DATABASE_URL')
-DATABASE_URL = None  # SQLite を使う
+# DATABASE_URL = None  # 強制的にSQLite を使う場合 (開発時など)
 RENDER_DATA_DIR = os.environ.get('RENDER_DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
-DATABASE_PATH = os.path.join(RENDER_DATA_DIR, 'attendance.db')
-
-GIT_USER_EMAIL = "konosuke.hirata@gmail.com"
-GIT_USER_NAME = "yukirin88"
+DATABASE_FILE = 'attendance.db'
+DATABASE_PATH = os.path.join(RENDER_DATA_DIR, DATABASE_FILE)
 TIMEZONE = pytz.timezone('Asia/Tokyo')
-
-def ensure_db_directory_exists(db_path):
-    db_dir = os.path.dirname(db_path)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir)
-
-def get_db_connection():
-    ensure_db_directory_exists(DATABASE_PATH)
-    return sqlite3.connect(DATABASE_PATH)
-
-def is_db_empty(db_path):
-    """DBが空かどうかをチェックする関数"""
-    if not os.path.exists(db_path):
-        return True
-    try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if not cur.fetchone():
-            return True
-        cur.execute("SELECT COUNT(*) FROM users")
-        if cur.fetchone()[0] == 0:
-            return True
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'")
-        if not cur.fetchone():
-            return True
-        cur.execute("SELECT COUNT(*) FROM records")
-        if cur.fetchone()[0] == 0:
-            return True
-        return False
-    except Exception:
-        return True
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
-def backup_db_to_github():
-    """GitHubにDBをバックアップする関数"""
-    if is_db_empty(DATABASE_PATH):
-        print("DBが空のためバックアップをスキップします")
-        return
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
-    if not token:
-        print("GitHubトークンが設定されていません")
-        return
-    try:
-        subprocess.run(['git', 'config', '--global', 'user.email', GIT_USER_EMAIL], check=True)
-        subprocess.run(['git', 'config', '--global', 'user.name', GIT_USER_NAME], check=True)
-        today = datetime.now(TIMEZONE).strftime('%Y-%m-%d')
-        backup_filename = f"attendance_{today}.db"
-        backup_path = os.path.join(os.path.dirname(DATABASE_PATH), backup_filename)
-        shutil.copyfile(DATABASE_PATH, backup_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_url = f"https://x-access-token:{token}@github.com/yukirin88/Nekoooo.git"
-            subprocess.run(["git", "clone", "--branch", "db-backup", repo_url, tmpdir], check=True)
-            dst = os.path.join(tmpdir, backup_filename)
-            shutil.copyfile(backup_path, dst)
-            subprocess.run(["git", "add", backup_filename], cwd=tmpdir, check=True)
-            subprocess.run(["git", "commit", "-m", f"Auto backup {today}"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "pull", "origin", "db-backup"], cwd=tmpdir, check=False)
-            subprocess.run(["git", "push", "origin", "db-backup"], cwd=tmpdir, check=True)
-        print("バックアップをGitHubにpushしました")
-    except subprocess.CalledProcessError as e:
-        print(f"バックアップ処理中にエラーが発生しました: {str(e)}")
-    except Exception as e:
-        print(f"予期せぬエラーが発生しました: {str(e)}")
 
 app = Flask(__name__, template_folder='templates')
 Bootstrap(app)
 CORS(app)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+app.secret_key = os.environ.get('SECRET_KEY', 'your-default-secret-key') # 必ず環境変数で設定推奨
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -106,116 +42,298 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(hours=2)
 )
 
+# --- データベースディレクトリ関連 ---
+def ensure_db_directory_exists(db_path_to_check=DATABASE_PATH): # 引数名は変更
+    db_dir = os.path.dirname(db_path_to_check)
+    if db_dir and not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir)
+            print(f"ディレクトリ {db_dir} を作成しました。")
+        except OSError as e:
+            print(f"ディレクトリ {db_dir} の作成に失敗しました: {e}")
+            raise
+
+# --- GitHubバックアップ・リストア関連 ---
+def is_db_empty(db_path_to_check=DATABASE_PATH):
+    if not os.path.exists(db_path_to_check):
+        return True
+    try:
+        conn_check = sqlite3.connect(db_path_to_check)
+        cur_check = conn_check.cursor()
+        cur_check.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+        if not cur_check.fetchone():
+            return True
+        cur_check.execute("SELECT COUNT(*) FROM users")
+        if cur_check.fetchone()[0] == 0: # ユーザーテーブルが空でも「空」とみなすか要件次第
+            return True # 今回はユーザーがいたら空ではないとする
+        conn_check.close()
+        return False # usersテーブルにデータがあれば空ではない
+    except Exception as e:
+        print(f"DB空チェックエラー: {e}")
+        return True # エラー時は安全側に倒して「空」とみなす（リストア試行のため）
+
+def backup_database_to_github():
+    """GitHubにDBをバックアップする関数 (改善版)"""
+    if not GITHUB_TOKEN or not GITHUB_USERNAME or not GITHUB_REPOSITORY:
+        print("GitHubの認証情報(TOKEN, USERNAME, REPOSITORY)が不足しているため、バックアップをスキップします。")
+        return
+    if not os.path.exists(DATABASE_PATH) or is_db_empty(DATABASE_PATH): # 実際のファイル存在もチェック
+        print(f"データベースファイル {DATABASE_PATH} が存在しないか空のため、バックアップをスキップします。")
+        return
+
+    print("GitHubへのデータベースバックアップを開始します...")
+    ensure_db_directory_exists(DATABASE_PATH)
+
+    timestamp_str = datetime.now(TIMEZONE).strftime('%Y-%m-%d_%H-%M-%S')
+    backup_filename_on_github = f"backup_{timestamp_str}_{DATABASE_FILE}"
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{GITHUB_USERNAME}/{GITHUB_REPOSITORY}.git"
+            
+            # db-backupブランチが存在しない場合も考慮してクローン
+            try:
+                subprocess.run(["git", "clone", "--branch", "db-backup", "--single-branch", repo_url, tmpdir], check=True, capture_output=True, text=True)
+                print(f"db-backupブランチを {tmpdir} にクローンしました。")
+            except subprocess.CalledProcessError as e_clone_branch:
+                if "couldn't find remote ref db-backup" in e_clone_branch.stderr.lower() or \
+                   "could not checkout" in e_clone_branch.stderr.lower(): # GitHub Actionsなど環境によってエラーメッセージが異なる
+                    print("db-backupブランチが見つかりませんでした。リポジトリをクローンして新しいブランチを作成します。")
+                    subprocess.run(["git", "clone", repo_url, tmpdir], check=True, capture_output=True, text=True)
+                    subprocess.run(["git", "checkout", "-b", "db-backup"], cwd=tmpdir, check=True)
+                    print(f"リポジトリをクローンし、新しいdb-backupブランチを作成してチェックアウトしました: {tmpdir}")
+                else:
+                    print(f"db-backupブランチのクローン中に予期せぬエラー: {e_clone_branch.stderr}")
+                    raise
+            
+            # Gitユーザー設定
+            subprocess.run(['git', 'config', 'user.email', GIT_USER_EMAIL], cwd=tmpdir, check=True)
+            subprocess.run(['git', 'config', 'user.name', GIT_USER_NAME], cwd=tmpdir, check=True)
+
+            # バックアップファイルをtmpdirにコピー
+            destination_in_tmpdir = os.path.join(tmpdir, backup_filename_on_github)
+            shutil.copy2(DATABASE_PATH, destination_in_tmpdir)
+            print(f"データベースを {destination_in_tmpdir} にコピーしました。")
+
+            # .gitignoreの作成/追記（attendance.db自体は含めず、backup_*のみを対象とする）
+            gitignore_path = os.path.join(tmpdir, ".gitignore")
+            with open(gitignore_path, "a+") as f: # 追記モードで開き、存在しなければ作成
+                f.seek(0) # ファイルの先頭から読み込む
+                content = f.read()
+                if f"{DATABASE_FILE}\n" not in content: # attendance.db を無視
+                    f.write(f"{DATABASE_FILE}\n")
+                if f"*{DATABASE_FILE}\n" not in content: # *.db のようなパターンも考慮
+                     f.write(f"*{DATABASE_FILE}\n")
+                if f"!backup_*{DATABASE_FILE}\n" not in content: # ただし backup_ で始まるものは対象
+                     f.write(f"!backup_*{DATABASE_FILE}\n")
+            subprocess.run(["git", "add", ".gitignore"], cwd=tmpdir, check=True)
+
+
+            subprocess.run(["git", "add", backup_filename_on_github], cwd=tmpdir, check=True)
+            
+            status_result = subprocess.run(["git", "status", "--porcelain"], cwd=tmpdir, capture_output=True, text=True)
+            if status_result.stdout: # 何か変更がある場合のみコミット
+                commit_message = f"Auto backup: {backup_filename_on_github}"
+                subprocess.run(["git", "commit", "-m", commit_message], cwd=tmpdir, check=True)
+                
+                # pull はコンフリクトの可能性があるので、バックアップのpushでは通常不要か、戦略による
+                # subprocess.run(["git", "pull", "origin", "db-backup", "--rebase"], cwd=tmpdir, check=False) 
+                subprocess.run(["git", "push", "origin", "db-backup"], cwd=tmpdir, check=True)
+                print(f"バックアップ {backup_filename_on_github} をGitHubにプッシュしました。")
+            else:
+                print("コミットする変更がありませんでした。プッシュはスキップします。")
+
+    except subprocess.CalledProcessError as e:
+        error_output = e.stderr.decode(errors='ignore') if e.stderr else (e.stdout.decode(errors='ignore') if e.stdout else "No output")
+        print(f"バックアップ処理中のGitコマンドエラー: {e.cmd} returned {e.returncode}\nOutput:\n{error_output}")
+    except FileNotFoundError as e: # gitコマンドが見つからない場合など
+        print(f"バックアップ処理中のファイル/コマンド未検出エラー: {e}")
+    except Exception as e:
+        print(f"バックアップ処理中に予期せぬエラーが発生しました: {str(e)}")
+
+
+def restore_database_from_github():
+    """GitHubから最新のデータベースバックアップをリストアする"""
+    if not GITHUB_TOKEN or not GITHUB_USERNAME or not GITHUB_REPOSITORY:
+        print("GitHubの認証情報が不足しているため、リストアをスキップします。")
+        return False
+
+    print("GitHubからのデータベースリストアを開始します...")
+    ensure_db_directory_exists(DATABASE_PATH)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            repo_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{GITHUB_USERNAME}/{GITHUB_REPOSITORY}.git"
+            subprocess.run(["git", "clone", "--branch", "db-backup", "--single-branch", repo_url, tmpdir], check=True, capture_output=True, text=True)
+            print(f"リストア用リポジトリを {tmpdir} にクローンしました。")
+
+            backup_files = [f for f in os.listdir(tmpdir) if f.startswith("backup_") and f.endswith(DATABASE_FILE)]
+            if not backup_files:
+                print(f"GitHubリポジトリ ({GITHUB_USERNAME}/{GITHUB_REPOSITORY}/db-backup) にバックアップファイルが見つかりません。")
+                return False
+
+            backup_files.sort(reverse=True) # 名前順で最新のものが先頭に来る想定 (YYYY-MM-DD_HH-MM-SS形式なので)
+            latest_backup_filename = backup_files[0]
+            latest_backup_path_in_repo = os.path.join(tmpdir, latest_backup_filename)
+            print(f"最新のバックアップファイル: {latest_backup_filename}")
+
+            if os.path.exists(DATABASE_PATH):
+                print(f"既存のデータベースファイル {DATABASE_PATH} を上書きします。")
+            
+            shutil.copy2(latest_backup_path_in_repo, DATABASE_PATH)
+            print(f"{latest_backup_filename} からデータベースを {DATABASE_PATH} にリストアしました。")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            error_output = e.stderr.decode(errors='ignore') if e.stderr else (e.stdout.decode(errors='ignore') if e.stdout else "No output")
+            if "couldn't find remote ref db-backup" in error_output.lower():
+                print("db-backupブランチが見つかりません。リストアできません。")
+            else:
+                print(f"リストア処理中のGitコマンドエラー: {e.cmd} returned {e.returncode}\nOutput:\n{error_output}")
+            return False
+        except FileNotFoundError as e: # gitコマンドが見つからない場合など
+             print(f"リストア処理中のファイル/コマンド未検出エラー: {e}")
+             return False
+        except Exception as e:
+            print(f"データベースのリストア中に予期しないエラーが発生しました: {str(e)}")
+            return False
+
+# --- データベース接続・初期化 ---
+def get_db_connection():
+    """環境に応じたデータベース接続を返す"""
+    if DATABASE_URL and DATABASE_URL.startswith("postgres"): # PostgreSQLを使う場合
+        try:
+            conn_pg = psycopg2.connect(DATABASE_URL)
+            # conn_pg.cursor_factory = DictCursor # DictCursorは fetchone()['column_name'] の形式
+            return conn_pg
+        except psycopg2.OperationalError as e_pg:
+            print(f"PostgreSQL接続エラー: {e_pg}。SQLiteにフォールバックします。")
+            # pass # SQLiteにフォールバック
+    
+    # SQLite接続 (デフォルトまたはフォールバック)
+    ensure_db_directory_exists(DATABASE_PATH) # ここで呼び出す
+    conn_sqlite = sqlite3.connect(DATABASE_PATH)
+    conn_sqlite.row_factory = sqlite3.Row # これで user['column_name'] のようにアクセス可能
+    conn_sqlite.execute("PRAGMA foreign_keys = ON")
+    return conn_sqlite
+
+def init_db():
+    """データベース構造を初期化"""
+    print("データベースを初期化します (テーブル作成)...")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # Usersテーブル
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            is_admin BOOLEAN DEFAULT 0,
+            is_private BOOLEAN DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        # Recordsテーブル
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            memo TEXT,
+            is_deleted BOOLEAN DEFAULT 0,
+            likes_count INTEGER DEFAULT 0,
+            is_private BOOLEAN DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        ''')
+        # Likesテーブル
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS likes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            record_id INTEGER NOT NULL,
+            timestamp DATETIME NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(record_id) REFERENCES records(id) ON DELETE CASCADE,
+            UNIQUE(user_id, record_id)
+        )
+        ''')
+        
+        # 既存テーブルへのカラム追加 (冪等性を持たせる)
+        table_columns = {
+            'users': [('is_private', 'BOOLEAN DEFAULT 0')],
+            'records': [('likes_count', 'INTEGER DEFAULT 0'), ('is_private', 'BOOLEAN DEFAULT 0')]
+        }
+        for table_name, columns_to_add in table_columns.items():
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            existing_columns = [row['name'] for row in cursor.fetchall()]
+            for col_name, col_definition in columns_to_add:
+                if col_name not in existing_columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_definition}")
+                        print(f"テーブル '{table_name}' にカラム '{col_name}' を追加しました。")
+                    except sqlite3.OperationalError as e_alter:
+                        # ALTER TABLE ADD COLUMN は SQLite 3.25.0 以降で IF NOT EXISTS をサポート
+                        # それ以前のバージョンでは duplicate column name エラーになる可能性がある
+                        if 'duplicate column name' in str(e_alter).lower():
+                            print(f"カラム '{col_name}' はテーブル '{table_name}' に既に存在します。")
+                        else:
+                            raise # それ以外のエラーは再送出
+        conn.commit()
+    print("データベースの初期化完了。")
+
+def create_admin_user():
+    """管理者ユーザー (admin/admin) を作成 (存在しない場合)"""
+    print("管理者ユーザーの存在を確認・作成します...")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        admin_username = 'admin'
+        admin_password = 'admin' # 本番環境ではより強固なパスワードと設定方法を推奨
+        cursor.execute('SELECT id FROM users WHERE username = ?', (admin_username,))
+        if not cursor.fetchone():
+            cursor.execute(
+                'INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)',
+                (admin_username, hash_password(admin_password), 1)
+            )
+            conn.commit()
+            print(f"管理者ユーザー '{admin_username}' を作成しました。")
+        else:
+            print(f"管理者ユーザー '{admin_username}' は既に存在します。")
+
+def initialize_database_and_restore_if_needed():
+    """アプリ起動時にDB初期化処理（リストア試行後に新規作成）"""
+    print(f"データベースパス: {DATABASE_PATH}")
+    if os.path.exists(DATABASE_PATH) and os.path.getsize(DATABASE_PATH) > 0 and not is_db_empty(DATABASE_PATH): # ファイルが存在し、空でなく、中身もある
+        print(f"既存のデータベースファイル {DATABASE_PATH} を使用します。")
+        # ここでスキーママイグレーションが必要な場合は実行する (init_dbは冪等性があるので呼んでも良い)
+        init_db() # 既存DBに対してもスキーマ変更を適用できるように
+        create_admin_user() # 管理者も確認
+    else:
+        if os.path.exists(DATABASE_PATH):
+            print(f"データベースファイル {DATABASE_PATH} は存在しますが、空または不完全です。")
+        else:
+            print(f"データベースファイル {DATABASE_PATH} が存在しません。")
+        
+        print("GitHubからのリストアを試みます...")
+        if restore_database_from_github():
+            print("GitHubからのデータベースリストアに成功しました。")
+            # リストア後もスキーマ確認・管理者確認
+            init_db() 
+            create_admin_user()
+        else:
+            print("GitHubからのリストアに失敗、またはバックアップが存在しませんでした。新しいデータベースを作成します。")
+            init_db()
+            create_admin_user()
+
+# --- アプリケーションコンテキスト初期化 ---
+with app.app_context():
+    initialize_database_and_restore_if_needed()
+
+# --- ヘルパー関数・デコレーター ---
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-def ensure_db_directory_exists():
-    db_dir = os.path.dirname(DATABASE_PATH)
-    if not os.path.exists(db_dir):
-        os.makedirs(db_dir)
-
-# データベース接続
-def get_db_connection():
-    """環境に応じたデータベース接続を返す"""
-    if DATABASE_URL:
-        try:
-            # PostgreSQL接続を試みる
-            conn = psycopg2.connect(DATABASE_URL)
-            conn.cursor_factory = DictCursor
-            return conn
-        except psycopg2.OperationalError:
-            # 接続エラーの場合はSQLiteにフォールバック
-            print("PostgreSQL connection failed, falling back to SQLite")
-    
-    # SQLite接続
-    ensure_db_directory_exists()
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-# データベース初期化
-def init_db():
-    """Initialize database with proper table structure"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            # Create users table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                is_admin BOOLEAN DEFAULT 0,
-                is_private BOOLEAN DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-            ''')
-            # Create records table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS records (
-                id INTEGER PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                action TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                memo TEXT,
-                is_deleted BOOLEAN DEFAULT 0,
-                likes_count INTEGER DEFAULT 0,
-                is_private BOOLEAN DEFAULT 0,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-            ''')
-            # Create likes table
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS likes (
-                id INTEGER PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                record_id INTEGER NOT NULL,
-                timestamp DATETIME NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id),
-                FOREIGN KEY(record_id) REFERENCES records(id)
-            )
-            ''')
-            # Add missing columns if needed
-            columns = [
-                ('users', 'is_private', 'INTEGER DEFAULT 0'),
-                ('records', 'likes_count', 'INTEGER DEFAULT 0')
-            ]
-
-            for table, column, definition in columns:
-                try:
-                    cursor.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
-                except sqlite3.OperationalError as e:
-                    if 'duplicate column name' not in str(e):
-                        raise
-            conn.commit()
-        except sqlite3.Error as e:
-            print(f"Database initialization error: {e}")
-            conn.rollback()
-
-# 管理者ユーザー作成
-def create_admin_user():
-    """Create admin user if not exists"""
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            admin = cursor.execute('SELECT * FROM users WHERE username = ?', ('admin',)).fetchone()
-            if not admin:
-                cursor.execute(
-                    'INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)',
-                    ('admin', hash_password('admin'), 1)
-                )
-            conn.commit()
-        except sqlite3.Error as e:
-            print(f"Admin user creation error: {e}")
-            conn.rollback()
-
-# Initialize app context
-with app.app_context():
-    init_db()
-    create_admin_user()
-
-# デコレーター
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -230,417 +348,377 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session or not session.get('is_admin'):
             flash('管理者権限が必要です。', 'error')
-            return redirect(url_for('login'))
+            return redirect(url_for('login')) # 管理者でなければ適切なページへ
         return f(*args, **kwargs)
     return decorated_function
 
 def jst_now():
-    return datetime.now(pytz.timezone('Asia/Tokyo'))
+    return datetime.now(TIMEZONE)
 
-# 睡眠評価関数
+# 睡眠評価関数 (内容はユーザー提供のものと同じ)
 def evaluate_sleep(sleep_duration):
-    """睡眠時間の評価を行う"""
-    optimal_sleep = 7.0  # 適正睡眠時間
+    optimal_sleep = 7.0
     sleep_ratio = sleep_duration / optimal_sleep
-    
-    if sleep_ratio >= 1.5:
-        return "寝すぎ⁉"
-    elif 1.286 <= sleep_ratio < 1.5:
-        return "ちょい寝すぎか。"
-    elif 1.0 <= sleep_ratio < 1.286:
-        return "良好だよ☻"
-    elif 0.858 <= sleep_ratio < 1.0:
-        return "もう少し寝てほしいかも..."
-    elif 0.50 <= sleep_ratio < 0.858:
-        return "頼むこれ以上は..."
-    else:
-        return "いい加減もっと寝ろよ！！"
+    if sleep_ratio >= 1.5: return "寝すぎ⁉"
+    elif 1.286 <= sleep_ratio < 1.5: return "ちょい寝すぎか。"
+    elif 1.0 <= sleep_ratio < 1.286: return "良好だよ☻"
+    elif 0.858 <= sleep_ratio < 1.0: return "もう少し寝てほしいかも..."
+    elif 0.50 <= sleep_ratio < 0.858: return "頼むこれ以上は..."
+    else: return "いい加減もっと寝ろよ！！"
 
-# 睡眠時間計算関数
-def calculate_average(sleep_times):
-    """全期間の平均睡眠時間を計算"""
-    if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': None}
-    
-    total_sleep = sum(item['duration'] for item in sleep_times)
-    avg_sleep = total_sleep / len(sleep_times)
-    avg_hours = int(avg_sleep)
-    avg_minutes = int((avg_sleep - avg_hours) * 60)
-    
-    # 循環インポートを避けるため、直接evaluate_sleep関数を使用
-    evaluation = evaluate_sleep(avg_sleep)
-    
+def round_decimal(value, places=1): # テンプレートで使われる可能性のある関数
+    if value is None: return None
+    return Decimal(str(value)).quantize(Decimal('0.1') ** places, rounding=ROUND_HALF_UP)
+
+# 睡眠時間計算関連 (ユーザー提供のものをベースに)
+def get_sleep_times_for_user(user_id):
+    """指定ユーザーの睡眠記録を取得・計算してリストで返す"""
+    with get_db_connection() as conn:
+        records_raw = conn.execute('''
+            SELECT action, timestamp FROM records
+            WHERE user_id = ? AND is_deleted = 0 AND (action = 'sleep' OR action = 'wake_up')
+            ORDER BY timestamp ASC
+        ''', (user_id,)).fetchall()
+
+    calculated_sleep_times = []
+    sleep_start_time = None
+    for row in records_raw:
+        current_time = datetime.fromisoformat(row['timestamp'])
+        if row['action'] == 'sleep':
+            sleep_start_time = current_time
+        elif row['action'] == 'wake_up' and sleep_start_time:
+            sleep_duration_seconds = (current_time - sleep_start_time).total_seconds()
+            if sleep_duration_seconds > 0: # マイナスや0は無効
+                sleep_duration_hours = sleep_duration_seconds / 3600
+                sleep_date_obj = current_time.date() # 起床日で記録
+                calculated_sleep_times.append({
+                    'date': sleep_date_obj,
+                    'duration': sleep_duration_hours,
+                    'hours': int(sleep_duration_hours),
+                    'minutes': int((sleep_duration_hours - int(sleep_duration_hours)) * 60),
+                    'week': sleep_date_obj.isocalendar()[1],
+                    'month': sleep_date_obj.month,
+                    'year': sleep_date_obj.year,
+                    'timestamp': current_time # wake_up のタイムスタンプ
+                })
+            sleep_start_time = None # ペア成立でリセット
+    return calculated_sleep_times
+
+def calculate_average_sleep(sleep_times_list):
+    if not sleep_times_list:
+        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-", 'avg_duration': 0.0}
+    total_duration = sum(item['duration'] for item in sleep_times_list)
+    avg_duration = total_duration / len(sleep_times_list)
+    avg_hours = int(avg_duration)
+    avg_minutes = int((avg_duration - avg_hours) * 60)
+    evaluation = evaluate_sleep(avg_duration) if len(sleep_times_list) >= 3 else "-" # 3日以上の記録で評価
     return {
-        'avg_hours': avg_hours,
-        'avg_minutes': avg_minutes,
-        'avg_duration': avg_sleep,
-        'evaluation': evaluation if len(sleep_times) >= 3 else None
+        'avg_hours': avg_hours, 
+        'avg_minutes': avg_minutes, 
+        'evaluation': evaluation,
+        'avg_duration': avg_duration
     }
 
-def calculate_weekly_average(sleep_times):
-    if not sleep_times:
-        return []  # ← ここが大事！
-    # 以下略...
-
-    # 週ごとにグループ化
-    weeks = {}
-    for item in sleep_times:
+def calculate_weekly_average_sleep(sleep_times_list):
+    if not sleep_times_list: return []
+    weeks_data = {}
+    for item in sleep_times_list:
         week_key = f"{item['year']}-W{item['week']:02d}"
-        if week_key not in weeks:
-            weeks[week_key] = []
-        weeks[week_key].append(item)
-
-    # 各週の平均を計算
-    weekly_avgs = []
-    for week_key, items in weeks.items():
-        total_sleep = sum(item['duration'] for item in items)
-        avg_sleep = total_sleep / len(items)
-        avg_hours = int(avg_sleep)
-        avg_minutes = int((avg_sleep - avg_hours) * 60)
-
-        year, week = week_key.split('-W')
-        start_date = datetime.strptime(f'{year}-{week}-1', '%Y-%W-%w').date()
-        end_date = start_date + timedelta(days=6)
-
-        weekly_avgs.append({
-            'period': f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}",
-            'avg_hours': avg_hours,
-            'avg_minutes': avg_minutes,
-            'avg_duration': avg_sleep,
-            'evaluation': evaluate_sleep(avg_sleep),
-            'start_date': start_date,
-            'week_key': week_key,
-            'record_days': len(items)  # ✅ 追加ポイント
+        if week_key not in weeks_data: weeks_data[week_key] = []
+        weeks_data[week_key].append(item['duration'])
+    
+    weekly_averages = []
+    for week_key, durations in weeks_data.items():
+        avg_duration = sum(durations) / len(durations)
+        avg_hours = int(avg_duration)
+        avg_minutes = int((avg_duration - avg_hours) * 60)
+        year_str, week_str = week_key.split('-W')
+        # 週の開始日と終了日を計算
+        # datetime.strptime は %W (月曜始まりの週番号) と %Y (年) から日付を生成
+        # %w (曜日、0が日曜) と合わせて週の初めの日 (月曜) を求める
+        week_start_date = datetime.strptime(f'{year_str}-{week_str}-1', '%Y-%W-%w').date() # 週の月曜日
+        week_end_date = week_start_date + timedelta(days=6) # 週の日曜日
+        weekly_averages.append({
+            'period': f"{week_start_date.strftime('%Y/%m/%d')}～{week_end_date.strftime('%Y/%m/%d')}",
+            'avg_hours': avg_hours, 'avg_minutes': avg_minutes, 'avg_duration': avg_duration,
+            'evaluation': evaluate_sleep(avg_duration),
+            'start_date': week_start_date, # ソート用
+            'record_days': len(durations)
         })
+    weekly_averages.sort(key=lambda x: x['start_date'], reverse=True)
+    return weekly_averages
 
-    weekly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
-    return weekly_avgs
-
-def calculate_monthly_average(sleep_times):
-    if not sleep_times:
-        return []  # ← 同様にここも！
-    # 以下略...
-
-    # 月ごとにグループ化
-    months = {}
-    for item in sleep_times:
+def calculate_monthly_average_sleep(sleep_times_list):
+    if not sleep_times_list: return []
+    months_data = {}
+    for item in sleep_times_list:
         month_key = f"{item['year']}-{item['month']:02d}"
-        if month_key not in months:
-            months[month_key] = []
-        months[month_key].append(item)
+        if month_key not in months_data: months_data[month_key] = []
+        months_data[month_key].append(item['duration'])
 
-    # 各月の平均を計算
-    monthly_avgs = []
-    for month_key, items in months.items():
-        total_sleep = sum(item['duration'] for item in items)
-        avg_sleep = total_sleep / len(items)
-        avg_hours = int(avg_sleep)
-        avg_minutes = int((avg_sleep - avg_hours) * 60)
-
-        year, month = map(int, month_key.split('-'))
-        start_date = datetime(year, month, 1).date()
-
-        monthly_avgs.append({
-            'period': f"{year}年{month}月",
-            'avg_hours': avg_hours,
-            'avg_minutes': avg_minutes,
-            'avg_duration': avg_sleep,
-            'evaluation': evaluate_sleep(avg_sleep),
-            'start_date': start_date,
-            'record_days': len(items)  # ✅ 追加
+    monthly_averages = []
+    for month_key, durations in months_data.items():
+        avg_duration = sum(durations) / len(durations)
+        avg_hours = int(avg_duration)
+        avg_minutes = int((avg_duration - avg_hours) * 60)
+        year_val, month_val = map(int, month_key.split('-'))
+        month_start_date = datetime(year_val, month_val, 1).date()
+        monthly_averages.append({
+            'period': f"{year_val}年{month_val}月",
+            'avg_hours': avg_hours, 'avg_minutes': avg_minutes, 'avg_duration': avg_duration,
+            'evaluation': evaluate_sleep(avg_duration),
+            'start_date': month_start_date, # ソート用
+            'record_days': len(durations)
         })
+    monthly_averages.sort(key=lambda x: x['start_date'], reverse=True)
+    return monthly_averages
 
-    monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
-    return monthly_avgs
+def calculate_sleep_comparisons(sleep_times_list):
+    if not sleep_times_list or len(sleep_times_list) < 1:
+        return {'yesterday': None, 'last_week': None, 'last_month': None}
 
-def calculate_comparisons(sleep_times):
-    """前日比、先週比、先月比を計算"""
-    if not sleep_times:
+    # 日付でソート (最新が先頭)
+    sorted_sleep_times = sorted(sleep_times_list, key=lambda x: x['date'], reverse=True)
+    
+    latest_sleep = sorted_sleep_times[0]
+    today_date = latest_sleep['date']
+    
+    def get_diff_obj(current_duration, compare_duration):
+        if compare_duration is None: return None
+        diff_val = current_duration - compare_duration
+        is_increase_val = diff_val > 0
+        diff_abs_val = abs(diff_val)
         return {
-            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
+            'diff_hours': int(diff_abs_val),
+            'diff_minutes': int((diff_abs_val - int(diff_abs_val)) * 60),
+            'is_increase': is_increase_val
         }
-    
-    # 日付でソート
-    sorted_times = sorted(sleep_times, key=lambda x: x['date'], reverse=True)
-    
-    # 現在の日付を取得（sorted_times[0]['date']がすでにdatetime.dateオブジェクト）
-    today = sorted_times[0]['date']
-    
+
     # 前日比
-    yesterday_diff = calculate_diff(sorted_times, 0, 1)
+    yesterday_sleep = sorted_sleep_times[1]['duration'] if len(sorted_sleep_times) > 1 else None
+    yesterday_comp = get_diff_obj(latest_sleep['duration'], yesterday_sleep)
+
+    # 先週比 (同じ曜日)
+    last_week_sleep_duration = None
+    for past_sleep in sorted_sleep_times[1:]: # 最新以外と比較
+        if (today_date - past_sleep['date']).days >= 7 and today_date.weekday() == past_sleep['date'].weekday():
+            last_week_sleep_duration = past_sleep['duration']
+            break
+    last_week_comp = get_diff_obj(latest_sleep['duration'], last_week_sleep_duration)
     
-    # 先週比（同じ曜日）
-    last_week_idx = next((i for i, item in enumerate(sorted_times) if (today - item['date']).days >= 7 and today.weekday() == item['date'].weekday()), None)
-    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    # 先月比（同じ日）
-    last_month_day = today.day
-    last_month = today.month - 1 if today.month > 1 else 12
-    last_month_year = today.year if today.month > 1 else today.year - 1
-    last_month_idx = next((i for i, item in enumerate(sorted_times) if item['date'].year == last_month_year and item['date'].month == last_month and item['date'].day == last_month_day), None)
-    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
+    # 先月比 (同じ日)
+    last_month_sleep_duration = None
+    for past_sleep in sorted_sleep_times[1:]:
+        if past_sleep['date'].day == today_date.day: # 日が同じ
+            # 月が1ヶ月前かチェック
+            if today_date.month == 1 and past_sleep['date'].month == 12 and past_sleep['date'].year == today_date.year -1:
+                last_month_sleep_duration = past_sleep['duration']
+                break
+            elif past_sleep['date'].month == today_date.month - 1 and past_sleep['date'].year == today_date.year:
+                last_month_sleep_duration = past_sleep['duration']
+                break
+    last_month_comp = get_diff_obj(latest_sleep['duration'], last_month_sleep_duration)
+
     return {
-        'yesterday': yesterday_diff,
-        'last_week': last_week_diff,
-        'last_month': last_month_diff
+        'yesterday': yesterday_comp,
+        'last_week': last_week_comp,
+        'last_month': last_month_comp
     }
 
-def calculate_diff(sorted_times, current_idx, compare_idx):
-    """2つの睡眠時間の差分を計算"""
-    if not sorted_times or compare_idx is None or current_idx >= len(sorted_times) or compare_idx >= len(sorted_times):
-        return {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    current = sorted_times[current_idx]['duration']
-    compare = sorted_times[compare_idx]['duration']
-    diff = current - compare
-    is_increase = diff > 0
-    
-    diff_abs = abs(diff)
-    diff_hours = int(diff_abs)
-    diff_minutes = int((diff_abs - diff_hours) * 60)
-    
-    return {
-        'diff_hours': diff_hours,
-        'diff_minutes': diff_minutes,
-        'is_increase': is_increase
-    }  # 閉じ括弧を追加
-
-def sort_sleep_graph_data(sleep_data):
-    sorted_data = sorted(sleep_data, key=lambda x: x['timestamp'], reverse=True)
-    return sorted_data
-
-def prevent_message_duplication(current_page):
-    pages_with_message = ['daily', 'weekly', 'monthly', 'all']
-    if current_page not in pages_with_message:
-        return None  # ホーム画面にはメッセージを表示しない
-    
-def index():
-    user_message_key = f"user_{session['user_id']}_message"
-    user_message = session.pop(user_message_key, None)
-    return render_template("index.html", user_message=user_message)
-
-# ルート定義
-@app.route('/', methods=['GET', 'POST'])
+# --- ルート定義 ---
+@app.route('/', methods=['GET', 'POST']) # index関数は1つに統合
 @login_required
 def index():
     page = request.args.get('page', 1, type=int)
-    per_page = 10
+    per_page = 10 # 1ページあたりの表示件数
     offset = (page - 1) * per_page
-    
+
+    user_message_key = f"user_{session['user_id']}_message" # 管理者からのメッセージ用
+    user_message = session.pop(user_message_key, None)
+
     with get_db_connection() as conn:
-        try:
-            # 総レコード数を取得
-            total_records = conn.execute('''
-                SELECT COUNT(*) FROM records
-                WHERE user_id = ? AND is_deleted = 0 AND DATE(timestamp, '+9 hours') = DATE('now', '+9 hours')
-            ''', (session['user_id'],)).fetchone()[0]
-            
-            # ページネーション付きでレコードを取得
-            records = conn.execute('''
-                SELECT id, action,
-                       strftime('%Y-%m-%d', datetime(timestamp, '+9 hours')) as formatted_date,
-                       strftime('%H:%M:%S', datetime(timestamp, '+9 hours')) as formatted_time,
-                       memo, likes_count
-                FROM records
-                WHERE user_id = ? AND is_deleted = 0 AND DATE(timestamp, '+9 hours') = DATE('now', '+9 hours')
-                ORDER BY timestamp DESC
-                LIMIT ? OFFSET ?
-            ''', (session['user_id'], per_page, offset)).fetchall()
-            
-            total_pages = (total_records + per_page - 1) // per_page
-            
-        except sqlite3.Error as e:
-            flash(f"データベースエラーが発生しました: {e}", "error")
-            records = []
-            total_pages = 0
-    
+        # 今日の日付の記録を取得 (JST基準)
+        # SQLのDATE関数はUTCなので、JSTで今日の日付を計算して渡す
+        today_jst_str = jst_now().strftime('%Y-%m-%d')
+        
+        # 総レコード数を取得 (今日の記録のみ)
+        total_records_today = conn.execute('''
+            SELECT COUNT(*) FROM records
+            WHERE user_id = ? AND is_deleted = 0 AND date(timestamp) = ? 
+        ''', (session['user_id'], today_jst_str)).fetchone()[0] # timestamp は ISO8601 UTC で保存されている前提
+
+        # ページネーション付きで今日の記録を取得
+        records_today = conn.execute('''
+            SELECT id, action, memo, likes_count,
+                   strftime('%Y-%m-%d', timestamp) as formatted_date, 
+                   strftime('%H:%M:%S', timestamp) as formatted_time 
+            FROM records
+            WHERE user_id = ? AND is_deleted = 0 AND date(timestamp) = ?
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+        ''', (session['user_id'], today_jst_str, per_page, offset)).fetchall()
+        
+        total_pages_today = (total_records_today + per_page - 1) // per_page
+
     return render_template("index.html",
-                           records=records,
+                           records=records_today,
                            is_private=session.get('is_private', False),
+                           user_message=user_message,
                            page=page,
-                           total_pages=total_pages)
+                           total_pages=total_pages_today)
 
 @app.route('/like_record/<int:record_id>', methods=['POST'])
 @login_required
 def like_record(record_id):
-    from_page = request.args.get('from_page', 'index')
-    
-    try:
-        with get_db_connection() as conn:
+    from_page = request.form.get('from_page', 'index') # formから取得
+    page_num = request.form.get('page_num', '1')
+    user_filter_val = request.form.get('user_filter_val', 'all')
+
+    with get_db_connection() as conn:
+        try:
+            # 既にいいねしているか確認
             existing_like = conn.execute(
                 'SELECT id FROM likes WHERE user_id = ? AND record_id = ?',
                 (session['user_id'], record_id)
             ).fetchone()
-            
+
             if existing_like:
                 flash('すでにいいね済みです。', 'info')
             else:
+                conn.execute('BEGIN')
                 conn.execute(
                     'INSERT INTO likes (user_id, record_id, timestamp) VALUES (?, ?, ?)',
-                    (session['user_id'], record_id, jst_now())
+                    (session['user_id'], record_id, jst_now().isoformat()) # JSTで保存
                 )
                 conn.execute(
                     'UPDATE records SET likes_count = likes_count + 1 WHERE id = ?',
                     (record_id,)
                 )
                 conn.commit()
-                
-                # バックアップ
-                try:
-                    backup_db_to_github()
-                except Exception as e:
-                    app.logger.error(f"バックアップに失敗しました: {e}")
-                
                 flash('いいねしました！', 'success')
-    except sqlite3.Error as e:
-        flash(f'エラーが発生しました: {e}', 'error')
-    
-    if from_page == 'index':
-        return redirect(url_for('index'))
-    elif from_page == 'all_records':
-        return redirect(url_for('all_records'))
-    else:
-        return redirect(url_for('index'))
+                backup_database_to_github() # いいね後にもバックアップ
+        except sqlite3.IntegrityError: # UNIQUE制約違反など
+            conn.rollback()
+            flash('すでにいいね済みか、データベースエラーが発生しました。', 'warning')
+        except sqlite3.Error as e:
+            conn.rollback()
+            flash(f'データベースエラーが発生しました: {e}', 'error')
+            app.logger.error(f"Like record DB error: {e}")
+        except Exception as e_global:
+            conn.rollback()
+            flash(f'予期せぬエラーが発生しました: {e_global}', 'error')
+            app.logger.error(f"Like record unexpected error: {e_global}")
+            
+    # 元のページにリダイレクト
+    if from_page == 'all_records':
+        return redirect(url_for('all_records', page=page_num, user_id=user_filter_val))
+    elif from_page == 'day_records':
+        # day_records には日付が必要なので、record_idから日付を取得するか、フォームで渡す
+        date_val = request.form.get('date_val') # フォームで日付を渡すことを想定
+        if date_val:
+            return redirect(url_for('day_records', date=date_val))
+    return redirect(url_for('index', page=page_num))
+
 
 @app.route('/calendar', methods=['GET'])
 @login_required
 def calendar_view():
-    # 現在の日本時間を取得
-    now = datetime.now(pytz.timezone('Asia/Tokyo'))
-    year = request.args.get('year', now.year, type=int)
-    month = request.args.get('month', now.month, type=int)
+    now_jst = jst_now()
+    year = request.args.get('year', now_jst.year, type=int)
+    month = request.args.get('month', now_jst.month, type=int)
     
-    # カレンダー生成
-    cal = calendar.monthcalendar(year, month)
+    cal_obj = calendar.monthcalendar(year, month)
     
-    # 前月/次月計算
-    prev_year, prev_month = (year, month-1) if month > 1 else (year-1, 12)
-    next_year, next_month = (year, month+1) if month < 12 else (year+1, 1)
+    prev_month_date = datetime(year, month, 1) - timedelta(days=1)
+    next_month_date = datetime(year, month, calendar.monthrange(year, month)[1]) + timedelta(days=1)
     
     return render_template(
         'calendar.html',
-        year=year,
-        month=month,
-        cal=cal,
-        prev_year=prev_year,
-        prev_month=prev_month,
-        next_year=next_year,
-        next_month=next_month,
-        today=now.date()
+        year=year, month=month, cal=cal_obj,
+        prev_year=prev_month_date.year, prev_month=prev_month_date.month,
+        next_year=next_month_date.year, next_month=next_month_date.month,
+        today=now_jst.date()
     )
-
-def generate_calendar(year, month):
-    cal = calendar.monthcalendar(year, month)
-    return cal
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username').strip()
-        password = request.form.get('password')
-        
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        if not username or not password:
+            flash('ユーザー名とパスワードを入力してください。', 'error')
+            return render_template('login.html')
+
         with get_db_connection() as conn:
-            user = conn.execute(
-                'SELECT * FROM users WHERE username = ?', (username,)
-            ).fetchone()
-            
-            if user:
-                if user['password'] == hash_password(password):
-                    session.clear()  # セッションをクリア
-                    session.permanent = True
-                    session['user_id'] = user['id']
-                    session['username'] = user['username']
-                    session['is_admin'] = bool(user['is_admin'])
-                    session['is_private'] = bool(user['is_private'] if 'is_private' in user.keys() else 0)
-                    
-                    flash('おかえりなさい！', 'success')
-                    
-                    if session['is_admin']:
-                        return redirect(url_for('admin_dashboard'))
-                    else:
-                        return redirect(url_for('index'))
-                else:
-                    flash('ユーザー名またはパスワードが間違っています。', 'error')
-            else:
-                flash('ユーザーが存在しません。新規登録してください。', 'error')
-                
+            user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        
+        if user and user['password'] == hash_password(password):
+            session.clear()
+            session.permanent = True # PERMANENT_SESSION_LIFETIME が適用される
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            session['is_admin'] = bool(user['is_admin'])
+            session['is_private'] = bool(user['is_private'])
+            flash('おかえりなさい！', 'success')
+            return redirect(url_for('admin_dashboard' if session['is_admin'] else 'index'))
+        else:
+            flash('ユーザー名またはパスワードが間違っています。', 'error')
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form.get('username').strip()
-        password = request.form.get('password')
-        is_private = request.form.get('is_private') == 'on'  # チェックボックスの値を取得
-        
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        is_private = request.form.get('is_private') == 'on'
         if not username or not password:
             flash('ユーザー名とパスワードを入力してください。', 'error')
             return render_template('register.html')
-            
+
         with get_db_connection() as conn:
-            existing_user = conn.execute(
-                'SELECT id FROM users WHERE username = ?', (username,)
-            ).fetchone()
-            
-            if existing_user:
+            try:
+                conn.execute(
+                    'INSERT INTO users (username, password, is_private) VALUES (?, ?, ?)',
+                    (username, hash_password(password), int(is_private))
+                )
+                conn.commit()
+                flash('登録しました！ログインしてください。', 'success')
+                backup_database_to_github() # 登録後バックアップ
+                return redirect(url_for('login'))
+            except sqlite3.IntegrityError: # UNIQUE制約違反 (username)
+                conn.rollback()
                 flash('このユーザー名は既に使用されています。', 'error')
-                return render_template('register.html')
-                
-            conn.execute(
-                'INSERT INTO users (username, password, is_private) VALUES (?, ?, ?)',
-                (username, hash_password(password), int(is_private))
-            )
-            conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
-        flash('登録しました！', 'success')
-        return redirect(url_for('login'))
-        
+            except sqlite3.Error as e:
+                conn.rollback()
+                flash(f'登録中にデータベースエラーが発生しました: {e}', 'error')
+                app.logger.error(f"Register DB error: {e}")
     return render_template('register.html')
 
 @app.route('/sleep_graph')
 @login_required
 def sleep_graph():
-    period = request.args.get('period', 'daily')  # デフォルトは日別
+    period = request.args.get('period', 'daily')
     return render_template('sleep_graph.html', period=period)
 
 @app.route('/reset_password', methods=['GET', 'POST'])
 def reset_password():
     if request.method == 'POST':
-        username = request.form.get('username').strip()
-        new_password = request.form.get('new_password')
+        username = request.form.get('username', '').strip()
+        new_password = request.form.get('new_password', '')
+        if not username or not new_password:
+            flash('ユーザー名と新しいパスワードを入力してください。', 'error')
+            return render_template('reset_password.html')
         
         with get_db_connection() as conn:
-            user = conn.execute(
-                'SELECT * FROM users WHERE username = ?', (username,)
-            ).fetchone()
-            
-            if user:
-                conn.execute(
-                    'UPDATE users SET password = ? WHERE username = ?',
-                    (hash_password(new_password), username)
-                )
+            user_exists = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+            if user_exists:
+                conn.execute('UPDATE users SET password = ? WHERE username = ?', (hash_password(new_password), username))
                 conn.commit()
-                
-                # バックアップ
-                try:
-                    backup_db_to_github()
-                except Exception as e:
-                    app.logger.error(f"バックアップに失敗しました: {e}")
-                
                 flash('パスワードが更新されました。ログインしてください。', 'success')
+                backup_database_to_github() # パスワード変更後バックアップ
                 return redirect(url_for('login'))
             else:
                 flash('指定されたユーザー名が見つかりませんでした。', 'error')
-                
     return render_template('reset_password.html')
 
 @app.route('/logout')
@@ -652,912 +730,411 @@ def logout():
 
 @app.route('/record', methods=['POST'])
 @login_required
-def record():
+def record_action(): # 関数名を変更 (record だと request オブジェクトと被る可能性)
     action = request.form.get('action')
     memo = request.form.get('memo', '')
-
     if not action or action not in ['wake_up', 'sleep']:
-        flash('有効な行動を選択してください', 'danger')
+        flash('有効な行動を選択してください。', 'danger')
         return redirect(url_for('index'))
 
-    try:
-        timestamp = datetime.now(pytz.timezone('Asia/Tokyo'))
-        with get_db_connection() as conn:
-            # 既存レコード数をカウント
-            count_query = '''
+    timestamp_jst = jst_now()
+    timestamp_iso = timestamp_jst.isoformat() # JSTのままISOフォーマットで保存
+
+    with get_db_connection() as conn:
+        try:
+            # 同じ日の同じアクションの記録回数制限
+            today_str_for_query = timestamp_jst.strftime('%Y-%m-%d') # JSTでの今日の日付
+            existing_count = conn.execute('''
                 SELECT COUNT(*) FROM records
-                WHERE user_id = ? AND action = ? AND DATE(timestamp, '+9 hours') = DATE(?, '+9 hours')
-                AND is_deleted = 0
-            '''
-            existing_count = conn.execute(
-                count_query,
-                (session['user_id'], action, timestamp.isoformat())
-            ).fetchone()[0]
+                WHERE user_id = ? AND action = ? AND date(timestamp) = ? AND is_deleted = 0
+            ''', (session['user_id'], action, today_str_for_query)).fetchone()[0]
 
-            # 制限判定
-            if action == 'sleep' and existing_count >= 2:
-                flash('本日は2回までしか就寝記録できません。', 'warning')
-                return redirect(url_for('index'))
-            elif action == 'wake_up' and existing_count >= 1:
-                flash('本日は1回までしか起床記録できません。', 'warning')
+            if (action == 'sleep' and existing_count >= 2) or \
+               (action == 'wake_up' and existing_count >= 1):
+                flash(f'本日は{existing_count+1}回目の{action}記録はできません。', 'warning')
                 return redirect(url_for('index'))
 
-            # 記録を追加
-            conn.execute('BEGIN TRANSACTION')
             conn.execute(
-                '''INSERT INTO records
-                (user_id, action, timestamp, memo)
-                VALUES (?, ?, ?, ?)''',
-                (session['user_id'], action, timestamp.isoformat(), memo)
+                'INSERT INTO records (user_id, action, timestamp, memo) VALUES (?, ?, ?, ?)',
+                (session['user_id'], action, timestamp_iso, memo)
             )
             conn.commit()
-            flash('記録が正常に保存されました', 'success')
-
-        # 記録ごとにバックアップ（DB接続の外で実行するのが安全です）
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-            flash('バックアップに失敗しました', 'warning')
-
-    except sqlite3.Error as e:
-        error_message = f'データベースエラー: {str(e)}'
-        app.logger.error(error_message)
-        flash(error_message, 'danger')
-        try:
+            flash('記録が正常に保存されました。', 'success')
+            backup_database_to_github() # 記録後バックアップ
+        except sqlite3.Error as e:
             conn.rollback()
-        except Exception:
-            pass
-    except Exception as e:
-        error_message = f'予期せぬエラー: {str(e)}'
-        app.logger.error(error_message)
-        flash(error_message, 'danger')
-
+            flash(f'データベースエラーが発生しました: {e}', 'danger')
+            app.logger.error(f"Record action DB error: {e}")
     return redirect(url_for('index'))
+
 
 @app.route('/average_sleep')
 @login_required
-def average_sleep():
-    try:
-        period = request.args.get('period', 'daily')
-        with get_db_connection() as conn:
-            data = conn.execute('''
-                SELECT date(timestamp, '+9 hours') as date,
-                       action,
-                       timestamp
-                FROM records
-                WHERE user_id = ? AND is_deleted = 0
-                  AND (action = 'sleep' OR action = 'wake_up')
-                ORDER BY timestamp
-            ''', (session['user_id'],)).fetchall()
+def average_sleep_view(): # 関数名変更
+    period = request.args.get('period', 'daily') # daily, weekly, monthly
+    user_sleep_times = get_sleep_times_for_user(session['user_id'])
 
-            # 記録がない場合でもページを開ける仕様
-            if not data:
-                return render_template(
-                    'average_sleep.html',
-                    has_records=False,
-                    sleep_times=[],
-                    daily_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
-                    weekly_avg=[],
-                    monthly_avg=[],
-                    overall_avg={'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"},
-                    comparisons=None,
-                    period=period,
-                    evaluate_sleep=evaluate_sleep,
-                    round_decimal=round_decimal
-                )
+    if not user_sleep_times:
+        return render_template('average_sleep.html', has_records=False, period=period,
+                               evaluate_sleep=evaluate_sleep, round_decimal=round_decimal,
+                               daily_avg=None, weekly_avg=[], monthly_avg=[], overall_avg=None, comparisons=None)
 
-            # 記録がある場合の処理
-            sleep_times = []
-            sleep_start = None
-            for row in data:
-                if row['action'] == 'sleep':
-                    sleep_start = datetime.fromisoformat(row['timestamp'])
-                elif row['action'] == 'wake_up' and sleep_start:
-                    wake_time = datetime.fromisoformat(row['timestamp'])
-                    sleep_duration = (wake_time - sleep_start).total_seconds() / 3600
-                    sleep_hours = int(sleep_duration)
-                    sleep_minutes = int((sleep_duration - sleep_hours) * 60)
-                    sleep_date = datetime.fromisoformat(row['timestamp']).date()
-                    sleep_times.append({
-                        'date': sleep_date,
-                        'duration': sleep_duration,
-                        'hours': sleep_hours,
-                        'minutes': sleep_minutes,
-                        'week': sleep_date.isocalendar()[1],
-                        'month': sleep_date.month,
-                        'year': sleep_date.year
-                    })
-                    sleep_start = None
-
-            daily_avg = calculate_average(sleep_times)
-            overall_avg = calculate_overall_average(sleep_times)
-            weekly_avg = calculate_weekly_average(sleep_times)
-            monthly_avg = calculate_monthly_average(sleep_times)
-            comparisons = calculate_comparisons(sleep_times)
-            sleep_times.sort(key=lambda x: x['date'], reverse=True)
-
-            return render_template(
-                'average_sleep.html',
-                has_records=True,
-                daily_avg=daily_avg,
-                weekly_avg=weekly_avg,
-                monthly_avg=monthly_avg,
-                overall_avg=overall_avg,
-                comparisons=comparisons,
-                sleep_times=sleep_times,
-                period=period,
-                evaluate_sleep=evaluate_sleep,
-                round_decimal=round_decimal
-            )
-    except Exception as e:
-        app.logger.error(f"エラーが発生しました: {str(e)}")
-        flash("平均睡眠時間は未解放です！", "danger")
-        return redirect(url_for('index'))
-
-def calculate_average(sleep_times):
-    if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
-    total_sleep = sum(item['duration'] for item in sleep_times)
-    avg_sleep = total_sleep / len(sleep_times)
-    avg_hours = int(avg_sleep)
-    avg_minutes = int((avg_sleep - avg_hours) * 60)
-    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
-    return {
-        'avg_hours': avg_hours,
-        'avg_minutes': avg_minutes,
-        'avg_duration': avg_sleep,
-        'evaluation': evaluation
-    }
-
-def calculate_overall_average(sleep_times):
-    if not sleep_times:
-        return {'avg_hours': 0, 'avg_minutes': 0, 'evaluation': "-"}
-    total_sleep = sum(item['duration'] for item in sleep_times)
-    avg_sleep = total_sleep / len(sleep_times)
-    avg_hours = int(avg_sleep)
-    avg_minutes = int((avg_sleep - avg_hours) * 60)
-    evaluation = evaluate_sleep(avg_sleep) if len(sleep_times) >= 3 else "-"
-    return {
-        'avg_hours': avg_hours,
-        'avg_minutes': avg_minutes,
-        'avg_duration': avg_sleep,
-        'evaluation': evaluation
-    }
-
-def calculate_weekly_average(sleep_times):
-    if not sleep_times:
-        return []  # ← ここが大事！
-    # 以下略...
-
-    # 週ごとにグループ化
-    weeks = {}
-    for item in sleep_times:
-        week_key = f"{item['year']}-W{item['week']:02d}"
-        if week_key not in weeks:
-            weeks[week_key] = []
-        weeks[week_key].append(item)
-
-    # 各週の平均を計算
-    weekly_avgs = []
-    for week_key, items in weeks.items():
-        total_sleep = sum(item['duration'] for item in items)
-        avg_sleep = total_sleep / len(items)
-        avg_hours = int(avg_sleep)
-        avg_minutes = int((avg_sleep - avg_hours) * 60)
-
-        year, week = week_key.split('-W')
-        start_date = datetime.strptime(f'{year}-{week}-1', '%Y-%W-%w').date()
-        end_date = start_date + timedelta(days=6)
-
-        weekly_avgs.append({
-            'period': f"{start_date.strftime('%Y/%m/%d')}～{end_date.strftime('%Y/%m/%d')}",
-            'avg_hours': avg_hours,
-            'avg_minutes': avg_minutes,
-            'avg_duration': avg_sleep,
-            'evaluation': evaluate_sleep(avg_sleep),
-            'start_date': start_date,
-            'week_key': week_key,
-            'record_days': len(items)  # ✅ 追加ポイント
-        })
-
-    weekly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
-    return weekly_avgs
-
-def calculate_monthly_average(sleep_times):
-    if not sleep_times:
-        return []  # ← 同様にここも！
-    # 以下略...
-
-    # 月ごとにグループ化
-    months = {}
-    for item in sleep_times:
-        month_key = f"{item['year']}-{item['month']:02d}"
-        if month_key not in months:
-            months[month_key] = []
-        months[month_key].append(item)
-
-    # 各月の平均を計算
-    monthly_avgs = []
-    for month_key, items in months.items():
-        total_sleep = sum(item['duration'] for item in items)
-        avg_sleep = total_sleep / len(items)
-        avg_hours = int(avg_sleep)
-        avg_minutes = int((avg_sleep - avg_hours) * 60)
-
-        year, month = map(int, month_key.split('-'))
-        start_date = datetime(year, month, 1).date()
-
-        monthly_avgs.append({
-            'period': f"{year}年{month}月",
-            'avg_hours': avg_hours,
-            'avg_minutes': avg_minutes,
-            'avg_duration': avg_sleep,
-            'evaluation': evaluate_sleep(avg_sleep),
-            'start_date': start_date,
-            'record_days': len(items)  # ✅ 追加
-        })
-
-    monthly_avgs.sort(key=lambda x: x['start_date'], reverse=True)
-    return monthly_avgs
-
-def calculate_comparisons(sleep_times):
-    if not sleep_times:
-        return {
-            'yesterday': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_week': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False},
-            'last_month': {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-        }
+    overall_avg_data = calculate_average_sleep(user_sleep_times)
+    weekly_avg_data = calculate_weekly_average_sleep(user_sleep_times)
+    monthly_avg_data = calculate_monthly_average_sleep(user_sleep_times)
+    comparisons_data = calculate_sleep_comparisons(user_sleep_times)
     
-    # 日付でソート
-    sorted_times = sorted(sleep_times, key=lambda x: x['date'], reverse=True)
-    
-    # 現在の日付を取得（sorted_times[0]['date']がすでにdatetime.dateオブジェクト）
-    today = sorted_times[0]['date']
-    
-    # 前日比
-    yesterday_diff = calculate_diff(sorted_times, 0, 1)
-    
-    # 先週比（同じ曜日）
-    last_week_idx = next((i for i, item in enumerate(sorted_times) if (today - item['date']).days >= 7 and today.weekday() == item['date'].weekday()), None)
-    last_week_diff = calculate_diff(sorted_times, 0, last_week_idx) if last_week_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    # 先月比（同じ日）
-    last_month_day = today.day
-    last_month = today.month - 1 if today.month > 1 else 12
-    last_month_year = today.year if today.month > 1 else today.year - 1
-    last_month_idx = next((i for i, item in enumerate(sorted_times) if item['date'].year == last_month_year and item['date'].month == last_month and item['date'].day == last_month_day), None)
-    last_month_diff = calculate_diff(sorted_times, 0, last_month_idx) if last_month_idx else {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    return {
-        'yesterday': yesterday_diff,
-        'last_week': last_week_diff,
-        'last_month': last_month_diff
-    }
+    # 表示用に日付降順でソート
+    user_sleep_times.sort(key=lambda x: x['date'], reverse=True)
 
-def calculate_diff(sorted_times, current_idx, compare_idx):
-    """2つの睡眠時間の差分を計算"""
-    if not sorted_times or compare_idx is None or current_idx >= len(sorted_times) or compare_idx >= len(sorted_times):
-        return {'diff_hours': 0, 'diff_minutes': 0, 'is_increase': False}
-    
-    current = sorted_times[current_idx]['duration']
-    compare = sorted_times[compare_idx]['duration']
-    diff = current - compare
-    is_increase = diff > 0
-    
-    diff_abs = abs(diff)
-    diff_hours = int(diff_abs)
-    diff_minutes = int((diff_abs - diff_hours) * 60)
-    
-    return {
-        'diff_hours': diff_hours,
-        'diff_minutes': diff_minutes,
-        'is_increase': is_increase
-    }
+    return render_template('average_sleep.html',
+                           has_records=True,
+                           sleep_times=user_sleep_times,
+                           overall_avg=overall_avg_data,
+                           weekly_avg=weekly_avg_data,
+                           monthly_avg=monthly_avg_data,
+                           comparisons=comparisons_data,
+                           period=period,
+                           evaluate_sleep=evaluate_sleep, # テンプレートで使えるように渡す
+                           round_decimal=round_decimal)   # 同上
 
-def evaluate_sleep(sleep_duration):
-    """睡眠時間の評価を行う"""
-    optimal_sleep = 7.0  # 適正睡眠時間
-    sleep_ratio = sleep_duration / optimal_sleep
-    
-    if sleep_ratio >= 1.5:
-        return "寝すぎ⁉"
-    elif 1.286 <= sleep_ratio < 1.5:
-        return "ちょい寝すぎか。"
-    elif 1.0 <= sleep_ratio < 1.286:
-        return "良好だよ☻"
-    elif 0.858 <= sleep_ratio < 1.0:
-        return "もう少し寝てほしいかも..."
-    elif 0.50 <= sleep_ratio < 0.858:
-        return "頼むこれ以上は..."
-    else:
-        return "いい加減もっと寝ろよ！！"
-    
-def revise_previous_day_comparison(sleep_times):
-    comparisons = []
-    for i in range(len(sleep_times)):
-        if i == 0:
-            comparisons.append("-")
-        else:
-            diff = sleep_times[i]['duration'] - sleep_times[i-1]['duration']
-            diff_hours = int(abs(diff))
-            diff_minutes = int((abs(diff) - diff_hours) * 60)
-            comparison = f"{'+' if diff > 0 else '-'}{diff_hours}時間{diff_minutes}分"
-            comparisons.append(comparison)
-    return comparisons
 
-# カレンダーの日付クリック時に「今日の評価」と当日の睡眠時間表示
-@app.route('/day_records/<date>')  # パラメータを明示的に指定
+@app.route('/day_records/<date>') # <date> パラメータを追加
 @login_required
-def day_records(date):  # パラメータを受け取る
-    # 既存のコード
+def day_records(date):
     try:
-        # 日付形式の検証を追加
         parsed_date = datetime.strptime(date, '%Y-%m-%d').date()
-        # 年と月の情報を取得して保持
-        year = parsed_date.year
-        month = parsed_date.month
     except ValueError:
-        flash('無効な日付形式です', 'error')
+        flash('無効な日付形式です。YYYY-MM-DD形式で指定してください。', 'error')
         return redirect(url_for('calendar_view'))
+
+    user_id_to_query = session['user_id']
     
-    # デフォルト値を設定
-    sleep_hours = None
-    sleep_minutes = None
-    sleep_evaluation = None
+    # 管理者の場合は全ユーザーの記録を見れるようにするか、の考慮は省略 (現在はログインユーザーのみ)
+    day_sleep_times = get_sleep_times_for_user(user_id_to_query)
+    
+    # 特定の日付の睡眠記録をフィルタリング
+    sleep_info_for_day = None
+    for st in day_sleep_times:
+        if st['date'] == parsed_date:
+            sleep_info_for_day = st # 該当日の最初の睡眠セグメントを採用（複数ある場合）
+            break
+            
+    sleep_hours = sleep_info_for_day['hours'] if sleep_info_for_day else None
+    sleep_minutes = sleep_info_for_day['minutes'] if sleep_info_for_day else None
+    sleep_evaluation = evaluate_sleep(sleep_info_for_day['duration']) if sleep_info_for_day else None
     
     with get_db_connection() as conn:
-        try:
-            if session.get('is_admin'):
-                records = conn.execute('''
-                    SELECT r.id, r.action, r.memo, r.is_deleted, r.likes_count, u.username,
-                    strftime('%Y-%m-%d %H:%M:%S', datetime(r.timestamp, '+9 hours')) as formatted_time
-                    FROM records r
-                    JOIN users u ON r.user_id = u.id
-                    WHERE DATE(r.timestamp, '+9 hours') = ?
-                    ORDER BY r.timestamp ASC
-                ''', (date,)).fetchall()
-            else:
-                records = conn.execute('''
-                    SELECT id, action, memo, is_deleted, likes_count,
-                    strftime('%Y-%m-%d %H:%M:%S', datetime(timestamp, '+9 hours')) as formatted_time
-                    FROM records
-                    WHERE user_id = ?
-                    AND DATE(timestamp, '+9 hours') = ?
-                    AND is_deleted = 0
-                    ORDER BY timestamp ASC
-                ''', (session['user_id'], date)).fetchall()
-            
-            # 当日の睡眠時間を計算
-            sleep_data = conn.execute('''
-                SELECT action, timestamp
-                FROM records
-                WHERE user_id = ? 
-                AND DATE(timestamp, '+9 hours') = ?
-                AND (action = 'sleep' OR action = 'wake_up')
-                AND is_deleted = 0
-                ORDER BY timestamp
-            ''', (session['user_id'], date)).fetchall()
-            
-            sleep_duration = None
-            sleep_evaluation = None
-            
-            # 睡眠データがある場合のみ計算
-            if sleep_data:
-                sleep_start = None
-                for row in sleep_data:
-                    if row['action'] == 'sleep' and not sleep_start:
-                        sleep_start = datetime.fromisoformat(row['timestamp'])
-                    elif row['action'] == 'wake_up' and sleep_start:
-                        wake_time = datetime.fromisoformat(row['timestamp'])
-                        sleep_duration = (wake_time - sleep_start).total_seconds() / 3600  # 時間単位
+        # その日の全アクション記録を取得
+        records_for_day = conn.execute('''
+            SELECT r.id, r.action, r.memo, r.is_deleted, r.likes_count, u.username,
+                   strftime('%Y-%m-%d %H:%M:%S', r.timestamp) as formatted_time 
+            FROM records r JOIN users u ON r.user_id = u.id
+            WHERE r.user_id = ? AND date(r.timestamp) = ? 
+            ORDER BY r.timestamp ASC 
+        ''', (user_id_to_query, date)).fetchall() if not session.get('is_admin') else \
+        conn.execute('''
+            SELECT r.id, r.action, r.memo, r.is_deleted, r.likes_count, u.username,
+                   strftime('%Y-%m-%d %H:%M:%S', r.timestamp) as formatted_time 
+            FROM records r JOIN users u ON r.user_id = u.id
+            WHERE date(r.timestamp) = ? 
+            ORDER BY r.timestamp ASC
+        ''', (date,)).fetchall()
 
-                        # 時間と分に分割
-                        sleep_hours = int(sleep_duration)
-                        sleep_minutes = int((sleep_duration - sleep_hours) * 60)
 
-                        
-                        # 評価メッセージを決定
-                        optimal_sleep = 7.0  # 適正睡眠時間
-                        sleep_ratio = sleep_duration / optimal_sleep
-                        
-                        if sleep_ratio >= 1.5:
-                            sleep_evaluation = "寝すぎ⁉"
-                        elif 1.286 <= sleep_ratio < 1.5:
-                            sleep_evaluation = "ちょい寝すぎか。"
-                        elif 1.0 <= sleep_ratio < 1.286:
-                            sleep_evaluation = "良好だよ☻"
-                        elif 0.858 <= sleep_ratio < 1.0:
-                            sleep_evaluation = "もう少し寝てほしいかも..."
-                        elif 0.50 <= sleep_ratio < 0.858:
-                            sleep_evaluation = "頼むこれ以上は..."
-                        else:
-                            sleep_evaluation = "いい加減もっと寝ろよ！！"
-                        
-                        break
-            
-            return render_template('day_records.html',
-                     date=parsed_date.strftime('%Y-%m-%d'),
-                     records=records,
-                     is_admin=session.get('is_admin'),
-                     sleep_duration_hours=sleep_hours,
-                     sleep_duration_minutes=sleep_minutes,
-                     sleep_evaluation=sleep_evaluation,
-                     year=year,
-                     month=month)
+    return render_template('day_records.html',
+                           date=parsed_date.strftime('%Y-%m-%d'),
+                           records=records_for_day,
+                           is_admin=session.get('is_admin'),
+                           sleep_duration_hours=sleep_hours,
+                           sleep_duration_minutes=sleep_minutes,
+                           sleep_evaluation=sleep_evaluation,
+                           year=parsed_date.year, # カレンダーに戻るため
+                           month=parsed_date.month)
 
-        
-        except sqlite3.Error as e:
-            flash(f'データベースエラー: {str(e)}', 'error')
-            return redirect(url_for('calendar_view'))
-        
+
 @app.route('/all_records')
 @login_required
 def all_records():
     page = request.args.get("page", 1, type=int)
     per_page = 20
     offset = (page - 1) * per_page
-    user_filter = request.args.get("user_id", "all")
+    user_filter_id = request.args.get("user_id", "all") # フィルターするユーザーID
 
     with get_db_connection() as conn:
-        # ユーザーリストを取得（adminや非公開ユーザーは除外）
-        users = conn.execute(
+        # ユーザーリストを取得（非公開ユーザーとadminは除く）
+        available_users = conn.execute(
             "SELECT id, username FROM users WHERE is_admin = 0 AND is_private = 0 ORDER BY username"
         ).fetchall()
-
-        # クエリ条件を構築（adminユーザーも除外）
-        query_conditions = "records.is_deleted=0 AND users.is_private=0 AND users.username != 'admin'"
+        
+        base_query = """
+            FROM records r JOIN users u ON r.user_id = u.id
+            WHERE r.is_deleted = 0 AND u.is_private = 0 AND u.is_admin = 0
+        """
         query_params = []
 
-        if user_filter != "all" and user_filter.isdigit():
-            query_conditions += " AND records.user_id=?"
-            query_params.append(int(user_filter))
+        if user_filter_id != "all" and user_filter_id.isdigit():
+            base_query += " AND r.user_id = ?"
+            query_params.append(int(user_filter_id))
 
-        # 総レコード数を取得
-        count_query = f"SELECT COUNT(*) FROM records JOIN users ON records.user_id=users.id WHERE {query_conditions}"
-        total_records = conn.execute(count_query, query_params).fetchone()[0]
+        total_records = conn.execute(f"SELECT COUNT(r.id) {base_query}", query_params).fetchone()[0]
+        
+        records_data = conn.execute(f"""
+            SELECT r.id, r.action, r.memo, r.likes_count, u.username, u.id as author_user_id,
+                   strftime('%Y-%m-%d', r.timestamp) as formatted_date,
+                   strftime('%H:%M:%S', r.timestamp) as formatted_time
+            {base_query}
+            ORDER BY r.timestamp DESC LIMIT ? OFFSET ?
+        """, query_params + [per_page, offset]).fetchall()
+        
+        # 現在のユーザーがいいねした記録IDのリストを取得
+        liked_record_ids = {
+            row['record_id'] for row in conn.execute(
+                "SELECT record_id FROM likes WHERE user_id = ?", (session['user_id'],)
+            ).fetchall()
+        }
 
-        # レコードを取得
-        records_query = f"""
-            SELECT users.username, users.id as user_id, records.id, records.action,
-                strftime('%Y-%m-%d', datetime(records.timestamp, '+9 hours')) as formatted_date,
-                strftime('%H:%M:%S', datetime(records.timestamp, '+9 hours')) as formatted_time,
-                records.memo, records.likes_count
-            FROM records JOIN users ON records.user_id=users.id
-            WHERE {query_conditions}
-            ORDER BY records.timestamp DESC LIMIT ? OFFSET ?"""
-
-        records = conn.execute(records_query, query_params + [per_page, offset]).fetchall()
-
-        # いいね情報を取得
-        liked_ids = [row["record_id"] for row in conn.execute(
-            "SELECT record_id FROM likes WHERE user_id=?",
-            (session["user_id"],)
-        ).fetchall()]
-
-        formatted_records = []
-        for record in records:
-            formatted_records.append({
-                "username": record["username"],
-                "user_id": record["user_id"],
-                "formatted_date": record["formatted_date"],
-                "formatted_time": record["formatted_time"],
-                "action": record["action"],
-                "memo": record["memo"],
-                "likes_count": record["likes_count"],
-                "id": record["id"],
-                "liked": record["id"] in liked_ids
-            })
-
+        formatted_records_list = [dict(row, liked=(row['id'] in liked_record_ids)) for row in records_data]
         total_pages = (total_records + per_page - 1) // per_page
 
-        return render_template("all_records.html",
-                              records=formatted_records,
-                              users=users,
-                              current_user=user_filter,
-                              page=page,
-                              total_pages=total_pages)
+    return render_template("all_records.html",
+                           records=formatted_records_list,
+                           users=available_users,
+                           current_user_filter=user_filter_id,
+                           page=page,
+                           total_pages=total_pages)
 
 @app.route('/toggle_privacy', methods=['POST'])
 @login_required
 def toggle_privacy():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-        
-    is_private = request.form.get('is_private') == 'on'
-    
-    try:
-        with get_db_connection() as conn:
-            conn.execute(
-                'UPDATE users SET is_private = ? WHERE id = ?',
-                (int(is_private), session['user_id'])
-            )
+    new_is_private_status = request.form.get('is_private') == 'on'
+    with get_db_connection() as conn:
+        try:
+            conn.execute('UPDATE users SET is_private = ? WHERE id = ?', (int(new_is_private_status), session['user_id']))
             conn.commit()
-            
-        # セッションの値も更新
-        session['is_private'] = is_private
-        
-        if is_private:
-            flash('プライベートモードに設定しました。あなたの記録は他のユーザーには表示されません。', 'success')
-        else:
-            flash('パブリックモードに設定しました。あなたの記録は他のユーザーにも表示されます。', 'success')
-            
-    except sqlite3.Error as e:
-        flash(f'プライバシー設定更新中にエラーが発生しました: {e}', 'error')
-        
+            session['is_private'] = new_is_private_status # セッション情報も更新
+            flash(f"プライバシー設定を「{'プライベート' if new_is_private_status else 'パブリック'}」に更新しました。", 'success')
+            backup_database_to_github() # 設定変更後バックアップ
+        except sqlite3.Error as e:
+            flash(f'プライバシー設定更新中にエラー: {e}', 'error')
     return redirect(url_for('index'))
+
 
 @app.route('/delete_record/<int:record_id>', methods=['POST'])
 @login_required
 def delete_record(record_id):
-    try:
-        redirect_to = request.form.get('redirect_to', 'day_records')
-        
-        with get_db_connection() as conn:
-            record = conn.execute(
-                '''
-                SELECT * FROM records
-                WHERE id = ? AND user_id = ?
-                ''', (record_id, session['user_id'])
-            ).fetchone()
-            
-            if not record:
-                flash('記録が見つからないか、削除権限がありません。', 'error')
-                return redirect(url_for('index'))
-            
-            record_date = datetime.fromisoformat(record['timestamp']).date()
-            
-            conn.execute(
-                '''
-                UPDATE records
-                SET is_deleted = 1
-                WHERE id = ? AND user_id = ?
-                ''', (record_id, session['user_id'])
-            )
-            conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
-        flash('記録が削除されました。', 'success')
-        
-        if redirect_to == 'index':
-            return redirect(url_for('index'))
-        elif redirect_to == 'all_records':
-            page = request.form.get('page', 1)
-            user_filter = request.form.get('user_filter', 'all')
-            return redirect(url_for('all_records', page=page, user_id=user_filter))
+    redirect_to_page = request.form.get('redirect_to', 'day_records') # どのページに戻るか
+    date_for_redirect = request.form.get('date_val') # day_recordsに戻る場合の日付
+    
+    with get_db_connection() as conn:
+        # 削除権限の確認 (自分の記録か、または管理者か)
+        record_owner = conn.execute('SELECT user_id FROM records WHERE id = ?', (record_id,)).fetchone()
+        if not record_owner or (record_owner['user_id'] != session['user_id'] and not session.get('is_admin')):
+            flash('記録が見つからないか、削除権限がありません。', 'error')
         else:
-            return redirect(url_for('day_records', date=record_date.strftime('%Y-%m-%d')))
-                
-    except sqlite3.Error as e:
-        flash(f'記録の削除中にエラーが発生しました: {e}', 'error')
-        return redirect(url_for('index'))
+            try:
+                # いいねも削除（参照整合性のため）
+                conn.execute('DELETE FROM likes WHERE record_id = ?', (record_id,))
+                # 記録を論理削除
+                conn.execute('UPDATE records SET is_deleted = 1 WHERE id = ?', (record_id,))
+                conn.commit()
+                flash('記録を削除しました。', 'success')
+                backup_database_to_github() # 削除後バックアップ
+            except sqlite3.Error as e:
+                conn.rollback()
+                flash(f'記録削除中にエラー: {e}', 'error')
 
-# 管理者画面の記録一覧ページネーション（20件ずつ）
+    if redirect_to_page == 'index':
+        return redirect(url_for('index'))
+    elif redirect_to_page == 'all_records':
+        page = request.form.get('page_num', 1)
+        user_filter = request.form.get('user_filter_val', 'all')
+        return redirect(url_for('all_records', page=page, user_id=user_filter))
+    elif redirect_to_page == 'day_records' and date_for_redirect:
+        return redirect(url_for('day_records', date=date_for_redirect))
+    # デフォルトはindex
+    return redirect(url_for('index'))
+
+
+# --- 管理者向けルート ---
 @app.route('/admin_dashboard')
 @admin_required
 def admin_dashboard():
     page = request.args.get('page', 1, type=int)
     per_page = 20
     offset = (page - 1) * per_page
-    
     with get_db_connection() as conn:
-        # 一般ユーザーのみ取得（管理者以外）
-        users = conn.execute(
-            "SELECT id, username, created_at, is_private "
-            "FROM users WHERE is_admin = 0 "
-            "ORDER BY created_at DESC"
-        ).fetchall()
-        
-        # 総レコード数を取得
-        total_records = conn.execute('''
-        SELECT COUNT(*) FROM records
-        ''').fetchone()[0]
-        
-        # 記録リスト取得（ページネーション付き）
+        users = conn.execute("SELECT id, username, created_at, is_private FROM users WHERE is_admin = 0 ORDER BY created_at DESC").fetchall()
+        total_db_records = conn.execute('SELECT COUNT(*) FROM records').fetchone()[0] # 全記録数
         records = conn.execute('''
-        SELECT r.*, u.username, u.is_private,
-        strftime('%Y-%m-%d %H:%M:%S', datetime(r.timestamp, '+9 hours')) as formatted_time
-        FROM records r
-        JOIN users u ON r.user_id = u.id
-        ORDER BY r.timestamp DESC
-        LIMIT ? OFFSET ?
+            SELECT r.*, u.username, u.is_private,
+                   strftime('%Y-%m-%d %H:%M:%S', r.timestamp) as formatted_time
+            FROM records r JOIN users u ON r.user_id = u.id
+            ORDER BY r.timestamp DESC LIMIT ? OFFSET ?
         ''', (per_page, offset)).fetchall()
-        
-        total_pages = (total_records + per_page - 1) // per_page
-        
-        return render_template("admin_dashboard.html",
-                              users=users,
-                              records=records,
-                              page=page,
-                              total_pages=total_pages)
+        total_pages = (total_db_records + per_page - 1) // per_page
+    return render_template("admin_dashboard.html", users=users, records=records, page=page, total_pages=total_pages)
 
-@app.route('/admin/user_records/<int:user_id>')  # パラメータを明示的に指定
+@app.route('/admin/user_records/<int:user_id>') # <int:user_id> パラメータ
 @admin_required
-def admin_user_records(user_id):  # パラメータを受け取る
-    # 既存のコード
+def admin_user_records(user_id):
     page = request.args.get('page', 1, type=int)
     per_page = 20
     offset = (page - 1) * per_page
-    
     with get_db_connection() as conn:
-        # ユーザー情報を取得
-        user = conn.execute('SELECT username FROM users WHERE id = ?', (user_id,)).fetchone()
+        user = conn.execute('SELECT id, username FROM users WHERE id = ?', (user_id,)).fetchone()
         if not user:
-            flash('ユーザーが見つかりません', 'error')
+            flash('ユーザーが見つかりません。', 'error')
             return redirect(url_for('admin_dashboard'))
-            
-        # 総レコード数を取得
-        total_records = conn.execute('''
-            SELECT COUNT(*) FROM records
-            WHERE user_id = ? AND is_deleted = 0
-        ''', (user_id,)).fetchone()[0]
         
-        # ページネーション付きでレコードを取得
-        records = conn.execute('''
-            SELECT id, action,
-            strftime('%Y-%m-%d', datetime(timestamp, '+9 hours')) as formatted_date,
-            strftime('%H:%M:%S', datetime(timestamp, '+9 hours')) as formatted_time,
-            memo, likes_count, is_deleted
-            FROM records
-            WHERE user_id = ?
-            ORDER BY timestamp DESC
-            LIMIT ? OFFSET ?
+        total_user_records = conn.execute('SELECT COUNT(*) FROM records WHERE user_id = ?', (user_id,)).fetchone()[0] # is_deleted も考慮するなら追加
+        user_records = conn.execute('''
+            SELECT id, action, memo, likes_count, is_deleted,
+                   strftime('%Y-%m-%d %H:%M:%S', timestamp) as formatted_time
+            FROM records WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?
         ''', (user_id, per_page, offset)).fetchall()
-        
-        total_pages = (total_records + per_page - 1) // per_page
-        
-        return render_template('admin_user_records.html',
-                              user=user,
-                              user_id=user_id,
-                              records=records,
-                              page=page,
-                              total_pages=total_pages)
-    
+        total_pages = (total_user_records + per_page - 1) // per_page
+    return render_template('admin_user_records.html', user=user, records=user_records, page=page, total_pages=total_pages)
+
+
 @app.route('/admin/add_record', methods=['GET', 'POST'])
 @admin_required
 def admin_add_record():
-    if request.method == 'GET':
-        # ユーザーリストを取得（管理者を除外）
-        with get_db_connection() as conn:
-            users = conn.execute('SELECT id, username FROM users WHERE is_admin = 0').fetchall()
-        return render_template('admin_add_record.html', users=users)
+    if request.method == 'POST':
+        user_id_form = request.form.get('user_id')
+        action_form = request.form.get('action')
+        memo_form = request.form.get('memo', '')
+        timestamp_str_form = request.form.get('timestamp') # YYYY-MM-DDTHH:MM 形式を想定
 
-    # POSTリクエスト時の処理
-    user_id = request.form.get('user_id')
-    action = request.form.get('action')
-    memo = request.form.get('memo', '')
-    timestamp_input = request.form.get('timestamp')  # フォームから取得したタイムスタンプ
-
-    if not user_id or not action or action not in ['wake_up', 'sleep']:
-        flash('有効なユーザーと行動を選択してください', 'danger')
-        return redirect(url_for('admin_add_record'))
-
-    try:
-        # タイムスタンプを JST に変換
-        if timestamp_input:
-            timestamp = datetime.strptime(timestamp_input, '%Y-%m-%dT%H:%M')
-            timestamp = pytz.timezone('Asia/Tokyo').localize(timestamp)
+        if not user_id_form or not action_form or not timestamp_str_form:
+            flash('ユーザー、アクション、タイムスタンプは必須です。', 'danger')
         else:
-            timestamp = jst_now()  # フォーム未入力の場合は現在時刻
+            try:
+                # フォームからのタイムスタンプをdatetimeオブジェクトに変換し、JSTとして解釈
+                dt_naive = datetime.strptime(timestamp_str_form, '%Y-%m-%dT%H:%M')
+                dt_aware_jst = TIMEZONE.localize(dt_naive)
+                timestamp_to_save = dt_aware_jst.isoformat() # ISO形式で保存
 
-        with get_db_connection() as conn:
-            conn.execute('''
-                INSERT INTO records (user_id, action, timestamp, memo)
-                VALUES (?, ?, ?, ?)
-            ''', (user_id, action, timestamp.isoformat(), memo))  # JST のタイムスタンプを保存
-            
-            conn.commit()
+                with get_db_connection() as conn:
+                    conn.execute(
+                        'INSERT INTO records (user_id, action, timestamp, memo) VALUES (?, ?, ?, ?)',
+                        (user_id_form, action_form, timestamp_to_save, memo_form)
+                    )
+                    conn.commit()
+                flash('記録が追加されました。', 'success')
+                # 該当ユーザーに通知メッセージを設定 (オプション)
+                session[f'user_{user_id_form}_message'] = "管理者があなたの記録を追加しました。"
+                backup_database_to_github()
+                return redirect(url_for('admin_user_records', user_id=user_id_form))
+            except ValueError:
+                flash('タイムスタンプの形式が無効です。YYYY-MM-DDTHH:MM形式で入力してください。', 'danger')
+            except sqlite3.Error as e:
+                flash(f'記録追加中にデータベースエラー: {e}', 'danger')
+    
+    # GETリクエスト時の処理 (フォーム表示)
+    with get_db_connection() as conn:
+        users_list = conn.execute('SELECT id, username FROM users WHERE is_admin = 0 ORDER BY username').fetchall()
+    return render_template('admin_add_record.html', users=users_list)
 
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
 
-        # 該当ユーザーに通知メッセージを設定
-        session[f'user_{user_id}_message'] = "管理者が記録を追加しました。"
-
-        flash('記録が追加されました。', 'success')
-    except Exception as e:
-        flash(f'記録追加中にエラーが発生しました: {e}', 'danger')
-
-    return redirect(url_for('admin_dashboard'))
-
-@app.route('/admin/delete_record/<int:record_id>', methods=['POST'])
+@app.route('/admin/delete_record/<int:record_id>', methods=['POST']) # <int:record_id> パラメータ
 @admin_required
 def admin_delete_record(record_id):
-    try:
-        with get_db_connection() as conn:
-            record = conn.execute('SELECT * FROM records WHERE id = ?', (record_id,)).fetchone()
-            if not record:
+    user_id_of_record = None
+    with get_db_connection() as conn:
+        try:
+            # 記録が存在するか、またどのユーザーの記録か確認
+            record_to_delete = conn.execute('SELECT user_id FROM records WHERE id = ?', (record_id,)).fetchone()
+            if not record_to_delete:
                 flash('記録が見つかりません。', 'error')
                 return redirect(url_for('admin_dashboard'))
-
-            conn.execute('UPDATE records SET is_deleted = 1 WHERE id = ?', (record_id,))
+            
+            user_id_of_record = record_to_delete['user_id']
+            # 関連するいいねも削除
+            conn.execute('DELETE FROM likes WHERE record_id = ?', (record_id,))
+            # 記録を物理削除 (または論理削除 is_deleted=1)
+            conn.execute('DELETE FROM records WHERE id = ?', (record_id,)) # ここでは物理削除
+            # conn.execute('UPDATE records SET is_deleted = 1 WHERE id = ?', (record_id,)) # 論理削除の場合
             conn.commit()
-        
-        # バックアップ
-        try:
-            backup_db_to_github()
-        except Exception as e:
-            app.logger.error(f"バックアップに失敗しました: {e}")
-        
-        flash('記録が削除されました。', 'success')
-        return redirect(url_for('admin_user_records', user_id=record['user_id']))
-    except Exception as e:
-        flash(f'記録削除中にエラーが発生しました: {e}', 'danger')
-        return redirect(url_for('admin_dashboard'))
-
-@app.route('/delete_user/<int:user_id>', methods=['POST'])
-@admin_required
-def delete_user(user_id):
-    # 自分自身は削除できない
-    if user_id == session.get('user_id'):
-        flash('自分自身を削除することはできません。', 'error')
-        return redirect(url_for('admin_dashboard'))
-        
-    with get_db_connection() as conn:
-        # 削除対象が管理者かチェック
-        target_user = conn.execute('SELECT is_admin FROM users WHERE id = ?', (user_id,)).fetchone()
-        if target_user and target_user['is_admin']:
-            flash('管理者ユーザーは削除できません。', 'error')
-            return redirect(url_for('admin_dashboard'))
-            
-        try:
-            # トランザクション開始
-            conn.execute('BEGIN TRANSACTION')
-            
-            # ユーザーのいいねを削除
-            conn.execute('DELETE FROM likes WHERE user_id = ?', (user_id,))
-            
-            # ユーザーの記録に対するいいねも削除
-            conn.execute('DELETE FROM likes WHERE record_id IN (SELECT id FROM records WHERE user_id = ?)', (user_id,))
-            
-            # ユーザーの記録を削除
-            conn.execute('DELETE FROM records WHERE user_id = ?', (user_id,))
-            
-            # ユーザーを削除
-            conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
-            
-            # トランザクションコミット
-            conn.commit()
-
-            # バックアップ
-            try:
-                backup_db_to_github()
-            except Exception as e:
-                app.logger.error(f"バックアップに失敗しました: {e}")
-
-            flash('ユーザーが削除されました。', 'success')
+            flash('記録が削除されました。', 'success')
+            backup_database_to_github()
         except sqlite3.Error as e:
-            # エラー時はロールバック
             conn.rollback()
-            flash(f'ユーザー削除中にエラーが発生しました: {e}', 'error')
-            
+            flash(f'記録削除中にエラー: {e}', 'danger')
+    
+    if user_id_of_record:
+        return redirect(url_for('admin_user_records', user_id=user_id_of_record))
     return redirect(url_for('admin_dashboard'))
 
+@app.route('/delete_user/<int:user_id>', methods=['POST']) # <int:user_id> パラメータ
+@admin_required
+def delete_user(user_id):
+    if user_id == session.get('user_id'): # 自分自身は削除不可
+        flash('自分自身を削除することはできません。', 'error')
+        return redirect(url_for('admin_dashboard'))
+    
+    with get_db_connection() as conn:
+        user_to_delete = conn.execute('SELECT username, is_admin FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not user_to_delete:
+            flash('削除対象のユーザーが見つかりません。', 'error')
+        elif user_to_delete['is_admin']: # 管理者アカウントは削除不可
+            flash('管理者アカウントは削除できません。', 'error')
+        else:
+            try:
+                conn.execute('BEGIN')
+                # 関連レコード削除 (ON DELETE CASCADEが設定されていれば不要な場合もあるが明示的に行う)
+                conn.execute('DELETE FROM likes WHERE user_id = ?', (user_id,))
+                conn.execute('DELETE FROM likes WHERE record_id IN (SELECT id FROM records WHERE user_id = ?)', (user_id,))
+                conn.execute('DELETE FROM records WHERE user_id = ?', (user_id,))
+                conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+                conn.commit()
+                flash(f"ユーザー '{user_to_delete['username']}' と関連データを削除しました。", 'success')
+                backup_database_to_github()
+            except sqlite3.Error as e:
+                conn.rollback()
+                flash(f"ユーザー削除中にエラー: {e}", 'error')
+    return redirect(url_for('admin_dashboard'))
+
+# --- APIエンドポイント ---
 @app.route('/api/sleep_data')
 @login_required
-def sleep_data():
-    try:
-        # 選択された期間（日別、週別、月別）を取得
-        period = request.args.get('period', 'daily')  # デフォルトは日別
+def api_sleep_data():
+    period = request.args.get('period', 'daily')
+    user_id = session['user_id']
+    all_sleeps = get_sleep_times_for_user(user_id)
+
+    if period == 'daily':
+        # 日付と睡眠時間のペアを返す
+        data_to_return = [{'date': s['date'].isoformat(), 'duration': s['duration']} for s in all_sleeps]
+        data_to_return.sort(key=lambda x: x['date']) # チャート用に日付昇順
+    elif period == 'weekly':
+        weekly_avg_list = calculate_weekly_average_sleep(all_sleeps)
+        # 週の開始日と平均睡眠時間のペア
+        data_to_return = [{'period_start': w['start_date'].isoformat(), 'avg_duration': w['avg_duration']} for w in weekly_avg_list]
+        data_to_return.sort(key=lambda x: x['period_start'])
+    elif period == 'monthly':
+        monthly_avg_list = calculate_monthly_average_sleep(all_sleeps)
+        # 月の開始日と平均睡眠時間のペア
+        data_to_return = [{'period_start': m['start_date'].isoformat(), 'avg_duration': m['avg_duration']} for m in monthly_avg_list]
+        data_to_return.sort(key=lambda x: x['period_start'])
+    else:
+        return jsonify({'error': 'Invalid period specified'}), 400
         
-        with get_db_connection() as conn:
-            if period == 'daily':
-                # 日別データを取得
-                data = conn.execute('''
-                    SELECT date(timestamp, '+9 hours') as date,
-                           action,
-                           timestamp
-                    FROM records
-                    WHERE user_id = ? AND is_deleted = 0
-                    AND (action = 'sleep' OR action = 'wake_up')
-                    ORDER BY timestamp
-                ''', (session['user_id'],)).fetchall()
-                
-                # 睡眠時間を計算
-                sleep_times = []
-                sleep_start = None
-                
-                for row in data:
-                    if row['action'] == 'sleep':
-                        sleep_start = datetime.fromisoformat(row['timestamp'])
-                    elif row['action'] == 'wake_up' and sleep_start:
-                        wake_time = datetime.fromisoformat(row['timestamp'])
-                        sleep_duration = (wake_time - sleep_start).total_seconds() / 3600  # 時間単位
-                        
-                        # 時間と分に分割
-                        sleep_hours = int(sleep_duration)
-                        sleep_minutes = int((sleep_duration - sleep_hours) * 60)
-                        
-                        sleep_times.append({
-                            'date': row['date'],
-                            'duration': sleep_duration,
-                            'hours': sleep_hours,
-                            'minutes': sleep_minutes
-                        })
-                        sleep_start = None
-                
-            elif period == 'weekly':
-                # 週別平均データを取得
-                weekly_avg = calculate_weekly_average(get_sleep_times(conn, session['user_id']))
-                sleep_times = []
-                
-                for item in weekly_avg:
-                    sleep_times.append({
-                        'period': item['period'],
-                        'avg_duration': item['avg_duration'],
-                        'avg_hours': item['avg_hours'],
-                        'avg_minutes': item['avg_minutes']
-                    })
-                
-            elif period == 'monthly':
-                # 月別平均データを取得
-                monthly_avg = calculate_monthly_average(get_sleep_times(conn, session['user_id']))
-                sleep_times = []
-                
-                for item in monthly_avg:
-                    sleep_times.append({
-                        'period': item['period'],
-                        'avg_duration': item['avg_duration'],
-                        'avg_hours': item['avg_hours'],
-                        'avg_minutes': item['avg_minutes']
-                    })
-        
-        return jsonify(sleep_times)
-    except Exception as e:
-        app.logger.error(f"エラーが発生しました: {str(e)}")
-        return jsonify({'error': 'データ取得中にエラーが発生しました。'}), 500
+    return jsonify(data_to_return)
 
-# 睡眠時間データを取得するヘルパー関数
-def get_sleep_times(conn, user_id):
-    data = conn.execute('''
-        SELECT date(timestamp, '+9 hours') as date,
-               action,
-               timestamp
-        FROM records
-        WHERE user_id = ? AND is_deleted = 0
-        AND (action = 'sleep' OR action = 'wake_up')
-        ORDER BY timestamp
-    ''', (user_id,)).fetchall()
-    
-    sleep_times = []
-    sleep_start = None
-    
-    for row in data:
-        if row['action'] == 'sleep':
-            sleep_start = datetime.fromisoformat(row['timestamp'])
-        elif row['action'] == 'wake_up' and sleep_start:
-            wake_time = datetime.fromisoformat(row['timestamp'])
-            sleep_duration = (wake_time - sleep_start).total_seconds() / 3600  # 時間単位
-            
-            sleep_date = datetime.fromisoformat(row['timestamp']).date()
-            sleep_times.append({
-                'date': sleep_date,
-                'duration': sleep_duration,
-                'hours': int(sleep_duration),
-                'minutes': int((sleep_duration - int(sleep_duration)) * 60),
-                'week': sleep_date.isocalendar()[1],  # ISO週番号
-                'month': sleep_date.month,
-                'year': sleep_date.year
-            })
-            sleep_start = None
-    
-    return sleep_times
-
-from flask import send_file
-
+# --- DBダウンロード (開発用) ---
 @app.route('/download_db')
-def download_db():
-    return send_file(DATABASE_PATH, as_attachment=True)
+@admin_required # 管理者のみアクセス可能にする
+def download_db_file():
+    ensure_db_directory_exists(DATABASE_PATH)
+    if os.path.exists(DATABASE_PATH):
+        return send_file(DATABASE_PATH, as_attachment=True, download_name=DATABASE_FILE)
+    else:
+        flash("データベースファイルが見つかりません。", "error")
+        return redirect(url_for('admin_dashboard'))
 
-# その他のルートと関数は変更なし（適切なwith文を使用してデータベース接続を管理）
-
+# --- アプリ実行 ---
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000)) # PORTはRender等で自動設定される
+    # debug=True は開発時のみ。本番環境ではWSGIサーバー (Gunicornなど) を使用
+    app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG', '0') == '1')
