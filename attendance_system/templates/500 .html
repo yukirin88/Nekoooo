@@ -1,0 +1,10 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}サーバーエラー{% endblock %}
+{% block content %}
+<div class="container">
+    <h1>サーバー内部でエラーが発生しました</h1>
+    <p>申し訳ありませんが、リクエストの処理中にエラーが発生しました。</p>
+    <p>問題が解決しない場合は、管理者にお問い合わせください。</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">ホームに戻る</a>
+</div>
+{% endblock %}

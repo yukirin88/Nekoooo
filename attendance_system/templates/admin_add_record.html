@@ -1,0 +1,44 @@
+{% extends "bootstrap/base.html" %}
+{% block title %}記録の追加{% endblock %}
+{% block content %}
+<div class="container">
+    <h1>記録の追加　
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-primary btn-sm ml-3">管理画面に戻る</a>
+    </h1>
+    <form method="POST" action="{{ url_for('admin_add_record') }}">
+        <!-- ユーザー名選択 -->
+        <div class="form-group">
+            <label for="user_id">ユーザー名:</label>
+            <select name="user_id" id="user_id" class="form-control" required>
+                {% for user in users %}
+                <option value="{{ user.id }}">{{ user.username }}</option>
+                {% endfor %}
+            </select>
+        </div>        
+
+        <!-- 行動選択 -->
+        <div class="form-group">
+            <label for="action">行動:</label>
+            <select name="action" id="action" class="form-control" required>
+                <option value="sleep">就寝</option>
+                <option value="wake_up">起床</option>
+            </select>
+        </div>
+
+        <!-- 日付と時間 -->
+        <div class="form-group">
+            <label for="timestamp">日時:</label>
+            <input type="datetime-local" name="timestamp" id="timestamp" class="form-control" required />
+        </div>
+
+        <!-- メモ -->
+        <div class="form-group">
+            <label for="memo">メモ:</label>
+            <textarea name="memo" id="memo" class="form-control"></textarea>
+        </div>
+
+        <!-- 送信ボタン -->
+        <button type="submit" class="btn btn-primary">記録を追加</button>
+    </form>
+</div>
+{% endblock %}

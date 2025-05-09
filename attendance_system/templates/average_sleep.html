@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>平均睡眠時間</h2>
+    <a href="{{ url_for('index') }}" class="btn btn-primary mb-3">ホームに戻る</a>
+
+    <!-- 期間選択ドロップダウン -->
+    <select class="form-control mb-4" id="periodSelect" onchange="changePeriod(this.value)">
+        <option value="daily" {% if period == 'daily' %}selected{% endif %}>日別</option>
+        <option value="weekly" {% if period == 'weekly' %}selected{% endif %}>週別</option>
+        <option value="monthly" {% if period == 'monthly' %}selected{% endif %}>月別</option>
+        <option value="all" {% if period == 'all' %}selected{% endif %}>全期間</option>
+    </select>
+
+    <!-- 記録がない場合の表示 -->
+    {% if not has_records %}
+        <div class="alert alert-info mt-4">
+            <i class="bi bi-info-circle"></i>
+            睡眠記録がありません。最初の記録を追加してください。
+        </div>
+    {% else %}
+        <!-- 全体平均表示 -->
+        <div class="card mb-4 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">全体平均</h5>
+            </div>
+            <div class="card-body">
+                <p class="display-4 text-primary">
+                    {{ overall_avg.avg_hours }}時間{{ overall_avg.avg_minutes }}分
+                    <span class="badge bg-secondary">{{ overall_avg.evaluation }}</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- 日別比較 -->
+        {% if period == 'daily' %}
+            {% if sleep_times|length < 2 %}
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    最低2日分の記録が必要です
+                </div>
+            {% else %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h4>日別比較</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>日付</th>
+                                        <th>睡眠時間</th>
+                                        <th>前日比</th>
+                                        <th>評価</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in sleep_times %}
+                                    <tr>
+                                        <td>{{ item.date.strftime('%Y/%m/%d') }}</td>
+                                        <td>{{ item.hours }}時間{{ item.minutes }}分</td>
+                                        <td>
+                                            {% if loop.index0 < sleep_times|length - 1 %}
+                                                {% set next = sleep_times[loop.index0 + 1] %}
+                                                {% set diff = item.duration - next.duration %}
+                                                <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
+                                                    {{ "%+.1f"|format(diff) }}時間
+                                                </span>
+                                            {% else %} - {% endif %}
+                                        </td>
+                                        <td>{{ evaluate_sleep(item.duration) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+
+        <!-- 週別比較 -->
+        {% elif period == 'weekly' %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h4>週別比較</h4>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>期間</th>
+                                    <th>平均睡眠時間</th>
+                                    <th>記録日数</th>
+                                    <th>先週比</th>
+                                    <th>評価</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for week in weekly_avg %}
+                                <tr>
+                                    <td>{{ week.period }}</td>
+                                    <td>{{ week.avg_hours }}時間{{ week.avg_minutes }}分</td>
+                                    <td>{{ week.record_days }}日</td>
+                                    <td>
+                                        {% if loop.index0 < weekly_avg|length - 1 %}
+                                            {% set next = weekly_avg[loop.index0 + 1] %}
+                                            {% set diff = week.avg_duration - next.avg_duration %}
+                                            <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
+                                                {{ "%+.1f"|format(diff) }}時間
+                                            </span>
+                                        {% else %} - {% endif %}
+                                    </td>
+                                    <td>{{ week.evaluation }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        <!-- 月別比較 -->
+        {% elif period == 'monthly' %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h4>月別比較</h4>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>期間</th>
+                                    <th>平均睡眠時間</th>
+                                    <th>記録日数</th>
+                                    <th>先月比</th>
+                                    <th>評価</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for month in monthly_avg %}
+                                <tr>
+                                    <td>{{ month.period }}</td>
+                                    <td>{{ month.avg_hours }}時間{{ month.avg_minutes }}分</td>
+                                    <td>{{ month.record_days }}日</td>
+                                    <td>
+                                        {% if loop.index0 < monthly_avg|length - 1 %}
+                                            {% set next = monthly_avg[loop.index0 + 1] %}
+                                            {% set diff = month.avg_duration - next.avg_duration %}
+                                            <span class="{% if diff > 0 %}text-success{% else %}text-danger{% endif %}">
+                                                {{ "%+.1f"|format(diff) }}時間
+                                            </span>
+                                        {% else %} - {% endif %}
+                                    </td>
+                                    <td>{{ month.evaluation }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        <!-- 全期間表示 -->
+        {% elif period == 'all' %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                全期間の平均睡眠時間: {{ overall_avg.avg_hours }}時間{{ overall_avg.avg_minutes }}分
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+<script>
+function changePeriod(period) {
+    window.location.href = "{{ url_for('average_sleep') }}?period=" + period;
+}
+</script>
+{% endblock %}
