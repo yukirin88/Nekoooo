@@ -1,8 +1,0 @@
-2025-04-12 23:33:15,197 INFO: 睡眠記録アプリ起動 [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:43]
-2025-04-12 23:33:15,475 INFO: 睡眠記録アプリ起動 [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:43]
-2025-04-12 23:33:21,165 INFO: 睡眠記録アプリ起動 [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:43]
-2025-04-12 23:33:21,165 INFO: 睡眠記録アプリ起動 [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:43]
-2025-04-12 23:33:21,183 ERROR: エラーが発生しました: 'round' is undefined [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:719]
-2025-04-12 23:33:21,183 ERROR: エラーが発生しました: 'round' is undefined [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:719]
-2025-04-12 23:33:22,797 ERROR: エラーが発生しました: 'round' is undefined [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:719]
-2025-04-12 23:33:22,797 ERROR: エラーが発生しました: 'round' is undefined [in C:\Users\konos\OneDrive\デスクトップ\睡眠アプリ完成\元祖本アカ\本アカ\attendance_system\app.py:719]
