@@ -19,6 +19,37 @@ import pytz
 import psycopg2
 from psycopg2.extras import DictCursor
 
+import os
+import requests
+
+def restore_db_from_github():
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("PERSONAL_TOKEN")
+    if not token:
+        print("GitHubトークンが設定されていません。DBの自動復元をスキップします。")
+        return
+    api_url = "https://api.github.com/repos/yukirin88/Nekoooo/contents?ref=db-backup"
+    headers = {"Authorization": f"token {token}"}
+    resp = requests.get(api_url, headers=headers)
+    if resp.status_code != 200:
+        print("GitHub APIからバックアップ一覧の取得に失敗:", resp.text)
+        return
+    files = resp.json()
+    db_files = [f for f in files if f["name"].startswith("attendance_") and f["name"].endswith(".db")]
+    if not db_files:
+        print("バックアップDBが見つかりません")
+        return
+    # ファイル名で降順ソート（最新が一番上）
+    latest_db = sorted(db_files, key=lambda x: x["name"], reverse=True)[0]
+    download_url = latest_db["download_url"]
+    db_content = requests.get(download_url, headers=headers).content
+    db_path = os.path.join(os.path.dirname(__file__), "attendance.db")
+    with open(db_path, "wb") as f:
+        f.write(db_content)
+    print(f"DBをGitHubバックアップ({latest_db['name']})から復元しました")
+
+# アプリ起動時に一度だけ自動復元
+restore_db_from_github()
+
 # セッション設定・DBパスなどの定義
 DATABASE_URL = os.environ.get('DATABASE_URL')
 DATABASE_URL = None  # SQLite を使う
