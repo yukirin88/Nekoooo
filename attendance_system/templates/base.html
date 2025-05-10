@@ -168,6 +168,13 @@
       padding-left: 15px;
       padding-right: 15px;
     }
+    
+    /* テーブルとカードのスタイル */
+    .table-hover tbody tr:hover { background-color: rgba(0, 123, 255, 0.1); }
+    .bi { margin-right: 0.5rem; }
+    .card-header { background-color: #f8f9fa; }
+    .text-success { color: #28a745!important; }
+    .text-danger { color: #dc3545!important; }
   </style>
   
   {% block styles %}{% endblock %}
@@ -216,24 +223,6 @@
     });
   </script>
   
-  .table-hover tbody tr:hover {
-    background-color: rgba(0, 123, 255, 0.1);
-}
-.bi {
-    margin-right: 0.5rem;
-}
-.card-header {
-    background-color: #f8f9fa;
-}
-.text-success {
-    color: #28a745!important;
-}
-.text-danger {
-    color: #dc3545!important;
-}
-
-  
   {% block scripts %}{% endblock %}
 </body>
 </html>
->>>>>>> 76f13064feb8b2a314ee3705dce4c72cad6e0eda
