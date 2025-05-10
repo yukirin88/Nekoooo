@@ -1,5 +1,15 @@
 from decimal import Decimal, ROUND_HALF_UP
 
+def round_decimal(value, places=2):
+    """指定された小数点以下の桁数で四捨五入する"""
+    if value is None:
+        return None
+    
+    value_str = str(value)
+    quantize_str = '0.' + '0' * places
+    
+    return float(Decimal(value_str).quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP))
+
 import sys
 import os
 import shutil
