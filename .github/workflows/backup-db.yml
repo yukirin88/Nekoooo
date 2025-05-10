@@ -1,7 +1,17 @@
+<<<<<<< HEAD
 name: Manual Backup DB
 
 on:
   workflow_dispatch:
+=======
+# .github/workflows/backup-db.yml
+name: Backup SQLite DB to db-backup
+
+on:
+  schedule:
+    - cron: '0 15 * * *'  # 毎日0時 JST（UTC 15時）
+  workflow_dispatch:      # 手動実行も可能
+>>>>>>> 58e19c4 (Fix: use GITHUB_TOKEN to push backups)
 
 jobs:
   backup:
@@ -10,10 +20,13 @@ jobs:
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: 🕓 Set current date
         run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
+<<<<<<< HEAD
       - name: 💾 Create backup file
         run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
 
@@ -28,3 +41,22 @@ jobs:
           git add "attendance_${{ env.DATE }}.db"
           git commit -m "Auto backup ${{ env.DATE }}"
           git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
+=======
+      - name: Set current date
+        run: echo "DATE=$(date '+%Y%m%d')" >> $GITHUB_ENV
+
+      - name: Copy DB file with date
+        run: cp attendance.db attendance_${{ env.DATE }}.db
+
+      - name: Commit and push backup
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git checkout -B db-backup
+          git add -f attendance_${{ env.DATE }}.db
+          git commit -m "Auto backup: attendance_${{ env.DATE }}.db" || echo "No changes"
+          git push origin db-backup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+>>>>>>> 58e19c4 (Fix: use GITHUB_TOKEN to push backups)
