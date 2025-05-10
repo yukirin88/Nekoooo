@@ -762,8 +762,8 @@ def average_sleep():
                 ORDER BY timestamp
             ''', (session['user_id'],)).fetchall()
 
-            # 記録がない場合でもページを開ける仕様
             if not data:
+                # データがない場合はエラーにせず、空リストやデフォルト値で描画
                 return render_template(
                     'average_sleep.html',
                     has_records=False,
@@ -778,7 +778,7 @@ def average_sleep():
                     round_decimal=round_decimal
                 )
 
-            # 記録がある場合の処理
+            # --- ここからは記録が1件以上ある場合の既存処理 ---
             sleep_times = []
             sleep_start = None
             for row in data:
@@ -822,8 +822,8 @@ def average_sleep():
                 round_decimal=round_decimal
             )
     except Exception as e:
-        app.logger.error(f"エラーが発生しました: {str(e)}")
-        flash("平均睡眠時間は未解放です！", "danger")
+        app.logger.error(f"平均睡眠時間ページでエラーが発生しました: {str(e)}")
+        flash("平均睡眠時間ページでエラーが発生しました。管理者に連絡してください。", "danger")
         return redirect(url_for('index'))
 
 def calculate_average(sleep_times):
