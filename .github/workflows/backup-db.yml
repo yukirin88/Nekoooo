@@ -1,0 +1,36 @@
+# .github/workflows/backup.yml
+name: Backup SQLite DB to db-backup
+
+on:
+  schedule:
+    - cron: '0 15 * * *'  # 毎日0時(JST)に相当（GitHub ActionsはUTC）
+
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  backup-db:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Copy DB file with date
+        run: |
+          DATE=$(date '+%Y%m%d')
+          cp attendance.db attendance_${DATE}.db
+
+      - name: Commit and push backup
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git checkout -B db-backup
+          git add -f attendance_*.db
+          git commit -m "Auto backup: attendance_${DATE}.db" || echo "No changes"
+          git push origin db-backup
