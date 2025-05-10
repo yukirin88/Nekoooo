@@ -1,28 +1,46 @@
-name: Backup SQLite DB
+name: Daily Backup DB
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 毎日0時に実行
+    - cron: '0 15 * * *'  # 毎日0時(JST)
   workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Get date-based filename
-        run: echo "DB_NAME=attendance_$(date +'%Y-%m-%d').db" >> $GITHUB_ENV
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: main  # mainブランチからチェックアウト
 
-      - name: Download current DB from Render
-        run: curl -o $DB_NAME https://yukirin-github-io-nekooo.onrender.com/attendance.db
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-      - name: Commit DB to backup branch
+      - name: 📦 Install dependencies
         run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git init
-          git remote add origin https://github.com/yukirin88/Nekoooo.git
-          git fetch
-          git checkout -B db-backup
-          git add $DB_NAME
-          git commit -m "Auto backup $(date)"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🗃️ Initialize database
+        run: |
+          python -c "from attendance_system.app import init_db; init_db()"
+
+      - name: 🕓 Set current date
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: 💾 Create backup file
+        run: |
+          cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
+
+      - name: 🚀 Push to db-backup branch
+        run: |
+          git config --global user.email "github-actions@example.com"
+          git config --global user.name "github-actions"
+          git fetch origin db-backup
+          git checkout -B db-backup origin/db-backup
+          git add "attendance_${{ env.DATE }}.db"
+          git commit -m "Auto backup ${{ env.DATE }}"
           git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup --force

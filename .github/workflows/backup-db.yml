@@ -1,36 +1,30 @@
-# .github/workflows/backup.yml
-name: Backup SQLite DB to db-backup
+name: Manual Backup DB
 
 on:
-  schedule:
-    - cron: '0 15 * * *'  # 毎日0時(JST)に相当（GitHub ActionsはUTC）
-
-  workflow_dispatch:  # 手動実行も可能
+  workflow_dispatch:
 
 jobs:
-  backup-db:
+  backup:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: ⬇️ Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+      - name: 🕓 Set current date
+        run: echo "DATE=$(date -u +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Copy DB file with date
+      - name: 💾 Create backup file
+        run: cp attendance_system/attendance.db "attendance_${{ env.DATE }}.db"
+
+      - name: 🧪 Debug backup file list
+        run: ls -l *.db
+
+      - name: 🚀 Push to db-backup branch using PAT
         run: |
-          DATE=$(date '+%Y%m%d')
-          cp attendance.db attendance_${DATE}.db
-
-      - name: Commit and push backup
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-
+          git config --global user.email "github-actions@example.com"
+          git config --global user.name "github-actions"
           git checkout -B db-backup
-          git add -f attendance_*.db
-          git commit -m "Auto backup: attendance_${DATE}.db" || echo "No changes"
-          git push origin db-backup
+          git add "attendance_${{ env.DATE }}.db"
+          git commit -m "Auto backup ${{ env.DATE }}"
+          git push https://x-access-token:${{ secrets.PERSONAL_TOKEN }}@github.com/yukirin88/Nekoooo.git db-backup
