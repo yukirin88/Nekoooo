@@ -145,10 +145,4 @@ function changePeriod(period) {
     window.location.href = `/sleep_graph?period=${period}`;
 }
 </script>
-
-<script>
-function changePeriod(period) {
-    window.location.href = "{{ url_for('sleep_graph') }}?period=" + period;
-}
-</script>
 {% endblock %}

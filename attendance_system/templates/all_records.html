@@ -101,11 +101,4 @@
                 <a class="page-link" href="?page={{ page+1 }}">次へ</a>
             </li>
             {% endif %}
-            
-<script>
-function changePeriod(period) {
-    window.location.href = "{{ url_for('all_record') }}?period=" + period;
-}
-</script>
-
 {% endblock %}
