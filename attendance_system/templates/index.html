@@ -1,5 +1,4 @@
 {% extends "bootstrap/base.html" %}
-{% block title %}睡眠記録{% endblock %}
 
 {% block styles %}
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -309,5 +308,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 });
+</script>
+
+<script>
+function changePeriod(period) {
+    window.location.href = "{{ url_for('index') }}?period=" + period;
+}
 </script>
 {% endblock %}
