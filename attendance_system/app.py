@@ -22,6 +22,25 @@ import os
 import psycopg2
 from psycopg2.extras import DictCursor
 
+import subprocess
+
+def backup_and_push():
+    # 例: バックアップファイル作成処理
+
+    # git add & commit
+    subprocess.run(['git', 'add', '.'])
+    result = subprocess.run(['git', 'commit', '-m', 'バックアップ: 自動コミット'], capture_output=True, text=True)
+    if 'nothing to commit' in result.stdout:
+        print('差分がないためプッシュしません')
+        return
+
+    # git push
+    push_result = subprocess.run(['git', 'push', 'origin', 'main'], capture_output=True, text=True)
+    if push_result.returncode == 0:
+        print('Githubにプッシュしました')
+    else:
+        print('Githubへのプッシュに失敗しました:', push_result.stderr)
+
 # 環境変数からデータベースURLを取得
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
